@@ -370,7 +370,7 @@
     editorContainer.classList.toggle('focused-mode', !isTeacher);
 
     document.getElementById('feedbackSection').classList.toggle('hidden', !isTeacher);
-    document.getElementById('commentsSection').classList.toggle('hidden', !isTeacher);
+    document.getElementById('commentsSection').classList.remove('hidden'); // Everyone can see comments section now
     document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
 
     if (isTeacher) {
@@ -652,18 +652,26 @@
   async function loadComments(taskId) {
     const commentsList = document.getElementById('commentsList');
     const taskComments = await db.getTaskComments(taskId);
+    const user = db.getCurrentUser();
     commentsList.innerHTML = '';
 
     taskComments.forEach(comment => {
-      const div = document.createElement('div');
-      div.className = 'comment';
-      div.innerHTML = `
-        <div class="comment-author">${comment.author}</div>
-        <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
-        <div class="comment-text">${comment.text}</div>
-      `;
-      commentsList.appendChild(div);
+      // Privacy filter: students only see their own comments. Teachers see everything.
+      if (user.role === 'teacher' || comment.author === user.name) {
+        const div = document.createElement('div');
+        div.className = 'comment';
+        div.innerHTML = `
+          <div class="comment-author">${comment.author} ${comment.author === user.name ? '(You)' : ''}</div>
+          <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
+          <div class="comment-text">${comment.text}</div>
+        `;
+        commentsList.appendChild(div);
+      }
     });
+
+    if (commentsList.innerHTML === '' && user.role !== 'teacher') {
+        commentsList.innerHTML = '<div style="text-align:center; color:#999; padding:20px; font-size:13px;">No private comments yet. Share your thoughts with the teacher!</div>';
+    }
   }
 
   async function addComment() {
