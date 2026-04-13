@@ -1,0 +1,594 @@
+    let _supabase; // Initialized in init()
+
+    class WritingDB {
+        constructor() {
+            this.currentUser = null;
+        }
+
+        async init() {
+            // Fetch config from our Express server (keeps keys safe)
+            const config = await fetch('/api/config').then(res => res.json());
+            _supabase = supabase.createClient(config.url, config.key);
+
+            const { data: { session } } = await _supabase.auth.getSession();
+            if (session) {
+                this.currentUser = {
+                    id: session.user.id,
+                    email: session.user.email,
+                    name: session.user.user_metadata.full_name,
+                    role: session.user.user_metadata.role
+                };
+            }
+            return this.currentUser;
+        }
+
+        async registerUser(email, password, name, role) {
+            const { data, error } = await _supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: { full_name: name, role: role }
+                }
+            });
+            if (error) return { success: false, message: error.message };
+            return { success: true };
+        }
+
+        async loginUser(email, password) {
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+            if (error) return { success: false, message: error.message };
+            
+            this.currentUser = {
+                id: data.user.id,
+                email: data.user.email,
+                name: data.user.user_metadata.full_name,
+                role: data.user.user_metadata.role
+            };
+            return { success: true, user: this.currentUser };
+        }
+
+        getCurrentUser() {
+            return this.currentUser;
+        }
+
+        async logoutUser() {
+            await _supabase.auth.signOut();
+            this.currentUser = null;
+        }
+
+        async createTask(title, instructions, checklistText, createdBy) {
+            const checklist = checklistText.split('\n').filter(item => item.trim()).map(text => ({ text, checked: false }));
+            
+            const { data: task, error: taskError } = await _supabase
+                .from('tasks')
+                .insert([{ title, instructions, checklist, created_by: createdBy, status: 'draft' }])
+                .select()
+                .single();
+
+            if (taskError) throw taskError;
+
+            // Create initial revision
+            await this.addRevision(task.id, instructions, createdBy);
+            return task;
+        }
+
+        async getTasks() {
+            const { data, error } = await _supabase
+                .from('tasks')
+                .select('*')
+                .order('created_at', { ascending: false });
+            if (error) return [];
+            return data;
+        }
+
+        async getTask(taskId) {
+            const { data, error } = await _supabase
+                .from('tasks')
+                .select('*')
+                .eq('id', taskId)
+                .single();
+            return data;
+        }
+
+        async updateChecklist(taskId, checklist) {
+            await _supabase
+                .from('tasks')
+                .update({ checklist })
+                .eq('id', taskId);
+        }
+
+        async addRevision(taskId, content, author) {
+            const { data, error } = await _supabase
+                .from('revisions')
+                .insert([{ task_id: taskId, content, author }])
+                .select()
+                .single();
+            return data;
+        }
+
+        async getTaskRevisions(taskId) {
+            const { data, error } = await _supabase
+                .from('revisions')
+                .select('*')
+                .eq('task_id', taskId)
+                .order('timestamp', { ascending: true });
+            return data || [];
+        }
+
+        async addComment(taskId, author, text) {
+            const { data, error } = await _supabase
+                .from('comments')
+                .insert([{ task_id: taskId, author, text }])
+                .select()
+                .single();
+            return data;
+        }
+
+        async getTaskComments(taskId) {
+            const { data, error } = await _supabase
+                .from('comments')
+                .select('*')
+                .eq('task_id', taskId)
+                .order('timestamp', { ascending: true });
+            return data || [];
+        }
+    }
+
+  const db = new WritingDB();
+  let currentTaskId = null;
+  let editMode = false;
+
+  // Initialize DB and Check Session
+  window.addEventListener('load', async () => {
+    const user = await db.init();
+    if (user) {
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appContainer').classList.remove('hidden');
+      updateUserProfileUI(user);
+      loadDashboard();
+    }
+  });
+
+  function updateUserProfileUI(user) {
+    document.getElementById('userNameDisplay').textContent = user.name;
+    document.getElementById('userRoleDisplay').textContent = user.role;
+    document.getElementById('userAvatarIcon').textContent = user.name.charAt(0).toUpperCase();
+    
+    // Hide new task button for students
+    const newTaskBtn = document.getElementById('newTaskBtn');
+    if (user.role === 'teacher') {
+      newTaskBtn.classList.remove('hidden');
+    } else {
+      newTaskBtn.classList.add('hidden');
+    }
+  }
+
+  // Auth functions
+  function switchTab(tab) {
+    const loginForm = document.getElementById('loginForm');
+    const signupForm = document.getElementById('signupForm');
+    const tabs = document.querySelectorAll('.auth-tab');
+
+    if (tab === 'login') {
+      loginForm.classList.remove('hidden');
+      signupForm.classList.add('hidden');
+      tabs[0].classList.add('active');
+      tabs[1].classList.remove('active');
+    } else {
+      loginForm.classList.add('hidden');
+      signupForm.classList.remove('hidden');
+      tabs[0].classList.remove('active');
+      tabs[1].classList.add('active');
+    }
+  }
+
+  function showMessage(elementId, message, isError = false) {
+    const element = document.getElementById(elementId);
+    element.innerHTML = `<div class="${isError ? 'error-message' : 'success-message'}">${message}</div>`;
+    setTimeout(() => {
+      element.innerHTML = '';
+    }, 4000);
+  }
+
+  async function handleLogin() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+
+    if (!email || !password) {
+      showMessage('loginMessage', 'Please fill in all fields', true);
+      return;
+    }
+
+    const result = await db.loginUser(email, password);
+    if (result.success) {
+      const user = result.user;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appContainer').classList.remove('hidden');
+      updateUserProfileUI(user);
+      await loadDashboard();
+    } else {
+      showMessage('loginMessage', result.message, true);
+    }
+  }
+
+  async function handleSignup() {
+    const name = document.getElementById('signupName').value.trim();
+    const email = document.getElementById('signupEmail').value.trim();
+    const password = document.getElementById('signupPassword').value;
+    const role = document.getElementById('signupRole').value;
+
+    if (!name || !email || !password) {
+      showMessage('signupMessage', 'Please fill in all fields', true);
+      return;
+    }
+
+    const result = await db.registerUser(email, password, name, role);
+    if (result.success) {
+      showMessage('signupMessage', 'Account created! Please log in.', false);
+      setTimeout(() => switchTab('login'), 2000);
+    } else {
+      showMessage('signupMessage', result.message, true);
+    }
+  }
+
+  async function logout() {
+    await db.logoutUser();
+    location.reload();
+  }
+
+  async function loadDashboard() {
+    const taskGrid = document.getElementById('taskGrid');
+    const tasksList = document.getElementById('tasksList');
+
+    taskGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px;">Loading tasks...</div>';
+    tasksList.innerHTML = '';
+
+    const tasks = await db.getTasks();
+    taskGrid.innerHTML = '';
+
+    for (const task of tasks) {
+      const revisions = await db.getTaskRevisions(task.id);
+      const html = `
+        <div class="task-card" onclick="openTask('${task.id}')">
+          <h3>${task.title}</h3>
+          <p>${task.instructions.substring(0, 60)}...</p>
+          <div class="task-meta">
+            <span class="badge ${task.status}">${task.status}</span>
+            <span>${revisions.length} revisions</span>
+          </div>
+        </div>
+      `;
+      taskGrid.innerHTML += html;
+
+      const sidebarItem = document.createElement('div');
+      sidebarItem.className = 'sidebar-item';
+      sidebarItem.textContent = task.title.substring(0, 20) + '...';
+      sidebarItem.onclick = () => openTask(task.id);
+      tasksList.appendChild(sidebarItem);
+    }
+  }
+
+  async function openTask(taskId) {
+    currentTaskId = taskId;
+    const task = await db.getTask(taskId);
+    const revisions = await db.getTaskRevisions(taskId);
+    const currentRevision = revisions[revisions.length - 1];
+
+    document.getElementById('dashboardView').classList.add('hidden');
+    document.getElementById('editorView').classList.remove('hidden');
+
+    document.getElementById('taskTitle').textContent = task.title;
+    document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${currentRevision?.author || 'Unknown'}`;
+    
+    // Load content with highlights if enabled
+    await renderDraftContent(taskId);
+
+    document.getElementById('editBtn').classList.remove('hidden');
+
+    loadChecklistItems(task.checklist);
+    await loadComments(taskId);
+    await loadRevisions(taskId);
+  }
+
+  let highlightsEnabled = false;
+
+  async function toggleHighlights() {
+    highlightsEnabled = !highlightsEnabled;
+    const btn = document.getElementById('highlightBtn');
+    btn.classList.toggle('active', highlightsEnabled);
+    btn.textContent = highlightsEnabled ? '🏷️ Hide Authors' : '🏷️ Show Authors';
+    
+    document.getElementById('authorLegend').classList.toggle('hidden', !highlightsEnabled);
+    document.getElementById('draftText').classList.toggle('show-highlights', highlightsEnabled);
+    
+    await renderDraftContent(currentTaskId);
+  }
+
+  function getAuthorColor(name) {
+    if (!name) return { bg: '#eee', border: '#ccc' };
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash) % 360;
+    return {
+      bg: `hsla(${h}, 70%, 90%, 0.8)`,
+      border: `hsla(${h}, 70%, 40%, 1)`
+    };
+  }
+
+  async function renderDraftContent(taskId) {
+    const revisions = await db.getTaskRevisions(taskId);
+    const editor = document.getElementById('draftText');
+    const legendItems = document.getElementById('authorLegendItems');
+    
+    if (revisions.length === 0) return;
+    
+    const currentRevision = revisions[revisions.length - 1];
+
+    if (!highlightsEnabled) {
+      editor.textContent = currentRevision.content;
+      return;
+    }
+
+    // Authorship detection logic
+    const dmp = new diff_match_patch();
+    let textWithAuthors = [{ text: revisions[0].content, author: revisions[0].author }];
+    
+    for (let i = 1; i < revisions.length; i++) {
+        const rev = revisions[i];
+        const newContent = rev.content;
+        const oldContent = revisions[i-1].content;
+        
+        const diffs = dmp.diff_main(oldContent, newContent);
+        dmp.diff_cleanupSemantic(diffs);
+        
+        let newAttribution = [];
+        let oldIdx = 0;
+        
+        diffs.forEach(([type, text]) => {
+            if (type === 0) { // Unchanged
+                let remaining = text.length;
+                while (remaining > 0 && oldIdx < textWithAuthors.length) {
+                    const segment = textWithAuthors[oldIdx];
+                    if (segment.text.length <= remaining) {
+                        newAttribution.push({ ...segment });
+                        remaining -= segment.text.length;
+                        oldIdx++;
+                    } else {
+                        newAttribution.push({ text: segment.text.substring(0, remaining), author: segment.author });
+                        textWithAuthors[oldIdx].text = segment.text.substring(remaining);
+                        remaining = 0;
+                    }
+                }
+            } else if (type === 1) { // Added
+                newAttribution.push({ text, author: rev.author });
+            } else if (type === -1) { // Deleted
+                let remaining = text.length;
+                while (remaining > 0 && oldIdx < textWithAuthors.length) {
+                    const segment = textWithAuthors[oldIdx];
+                    if (segment.text.length <= remaining) {
+                        remaining -= segment.text.length;
+                        oldIdx++;
+                    } else {
+                        textWithAuthors[oldIdx].text = segment.text.substring(remaining);
+                        remaining = 0;
+                    }
+                }
+            }
+        });
+        textWithAuthors = newAttribution;
+    }
+
+    // Render HTML
+    editor.innerHTML = '';
+    legendItems.innerHTML = '';
+    const authors = new Set();
+    
+    textWithAuthors.forEach(seg => {
+        if (!seg.text) return;
+        const span = document.createElement('span');
+        span.className = 'author-highlight';
+        const colors = getAuthorColor(seg.author);
+        span.style.setProperty('--author-bg', colors.bg);
+        span.style.setProperty('--author-color', colors.border);
+        span.textContent = seg.text;
+        span.title = `Written by ${seg.author}`;
+        editor.appendChild(span);
+        authors.add(seg.author);
+    });
+    
+    authors.forEach(author => {
+        const colors = getAuthorColor(author);
+        const div = document.createElement('div');
+        div.className = 'legend-item';
+        div.innerHTML = `
+            <div class="legend-swatch" style="background: ${colors.bg}; border: 1px solid ${colors.border}"></div>
+            <span>${author}</span>
+        `;
+        legendItems.appendChild(div);
+    });
+  }
+
+  function goBack() {
+    editMode = false;
+    document.getElementById('editorView').classList.add('hidden');
+    document.getElementById('dashboardView').classList.remove('hidden');
+    document.getElementById('draftText').contentEditable = false;
+    document.getElementById('draftText').classList.remove('editing');
+    currentTaskId = null;
+    loadDashboard();
+  }
+
+  async function toggleEditMode() {
+    const user = db.getCurrentUser();
+
+    editMode = !editMode;
+    
+    // Disable highlights when editing for cleaner experience
+    if (editMode && highlightsEnabled) {
+      await toggleHighlights();
+    }
+
+    const editor = document.getElementById('draftText');
+    editor.contentEditable = editMode;
+    editor.classList.toggle('editing', editMode);
+    document.getElementById('editBtn').classList.toggle('active', editMode);
+
+    if (editMode) {
+      editor.focus();
+    }
+  }
+
+  async function saveRevision() {
+    const content = document.getElementById('draftText').textContent;
+    const user = db.getCurrentUser();
+
+    await db.addRevision(currentTaskId, content, user.name);
+
+    editMode = false;
+    document.getElementById('draftText').contentEditable = false;
+    document.getElementById('draftText').classList.remove('editing');
+    document.getElementById('editBtn').classList.remove('active');
+
+    const revisions = await db.getTaskRevisions(currentTaskId);
+    document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${user.name}`;
+
+    await loadRevisions(currentTaskId);
+    await renderDraftContent(currentTaskId);
+    alert('Revision saved!');
+  }
+
+  function loadChecklistItems(checklist) {
+    const listEl = document.getElementById('checklistItems');
+    listEl.innerHTML = '';
+    const user = db.getCurrentUser();
+    
+    checklist.forEach((item, idx) => {
+      const li = document.createElement('li');
+      const text = typeof item === 'string' ? item : item.text;
+      const checked = typeof item === 'object' ? item.checked : (item.checked || false);
+      
+      const isTeacher = user.role === 'teacher';
+      const isDisabled = !isTeacher ? 'disabled' : '';
+      const checkedAttr = checked ? 'checked' : '';
+      
+      li.innerHTML = `
+        <input type="checkbox" id="check-${idx}" ${isDisabled} ${checkedAttr} onchange="toggleChecklistItem(${idx}, this.checked)">
+        <label for="check-${idx}" style="${!isTeacher ? 'cursor: default;' : ''}">${text}</label>
+      `;
+      listEl.appendChild(li);
+    });
+    
+    if (user.role !== 'teacher') {
+      const helper = document.createElement('div');
+      helper.className = 'helper-text';
+      helper.style.marginTop = '10px';
+      helper.style.fontSize = '11px';
+      helper.innerHTML = '🔒 Only teachers can check feedback items.';
+      listEl.appendChild(helper);
+    }
+  }
+
+  async function toggleChecklistItem(idx, checked) {
+    const task = await db.getTask(currentTaskId);
+    if (task && task.checklist[idx]) {
+      task.checklist[idx].checked = checked;
+      await db.updateChecklist(currentTaskId, task.checklist);
+    }
+  }
+
+  async function loadComments(taskId) {
+    const commentsList = document.getElementById('commentsList');
+    const taskComments = await db.getTaskComments(taskId);
+    commentsList.innerHTML = '';
+
+    taskComments.forEach(comment => {
+      const div = document.createElement('div');
+      div.className = 'comment';
+      div.innerHTML = `
+        <div class="comment-author">${comment.author}</div>
+        <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
+        <div class="comment-text">${comment.text}</div>
+      `;
+      commentsList.appendChild(div);
+    });
+  }
+
+  async function addComment() {
+    const text = document.getElementById('newCommentText').value.trim();
+    if (!text) {
+      alert('Please write a comment');
+      return;
+    }
+
+    const user = db.getCurrentUser();
+    await db.addComment(currentTaskId, user.name, text);
+    document.getElementById('newCommentText').value = '';
+    await loadComments(currentTaskId);
+  }
+
+  async function loadRevisions(taskId) {
+    const revisionsList = document.getElementById('revisionsList');
+    const revisions = await db.getTaskRevisions(taskId);
+    revisionsList.innerHTML = '';
+
+    revisions.forEach((rev, idx) => {
+      const div = document.createElement('div');
+      div.className = 'revision-item';
+      if (idx === revisions.length - 1) div.classList.add('active');
+      div.innerHTML = `
+        <div class="revision-author">Rev ${idx + 1}</div>
+        <div class="revision-time">${new Date(rev.timestamp).toLocaleString()}</div>
+        <div style="color: #666; margin-top: 4px; font-size: 11px;">by ${rev.author}</div>
+      `;
+      div.onclick = () => {
+        document.getElementById('draftText').textContent = rev.content;
+        document.getElementById('draftText').contentEditable = false;
+        editMode = false;
+        document.getElementById('editBtn').classList.remove('active');
+        document.querySelectorAll('.revision-item').forEach(item => item.classList.remove('active'));
+        div.classList.add('active');
+
+        // Disable highlights when viewing history
+        if (highlightsEnabled) {
+          highlightsEnabled = false;
+          const btn = document.getElementById('highlightBtn');
+          btn.classList.remove('active');
+          btn.textContent = '🏷️ Show Authors';
+          document.getElementById('authorLegend').classList.add('hidden');
+          document.getElementById('draftText').classList.remove('show-highlights');
+        }
+      };
+      revisionsList.appendChild(div);
+    });
+  }
+
+  function openCreateTaskModal() {
+    document.getElementById('createTaskModal').classList.add('active');
+  }
+
+  function closeCreateTaskModal() {
+    document.getElementById('createTaskModal').classList.remove('active');
+    document.getElementById('newTaskTitle').value = '';
+    document.getElementById('newTaskInstructions').value = '';
+    document.getElementById('newTaskChecklist').value = '';
+  }
+
+  async function createTask() {
+    const title = document.getElementById('newTaskTitle').value.trim();
+    const instructions = document.getElementById('newTaskInstructions').value.trim();
+    const checklist = document.getElementById('newTaskChecklist').value.trim();
+
+    if (!title || !instructions || !checklist) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    const user = db.getCurrentUser();
+    await db.createTask(title, instructions, checklist, user.name);
+
+    closeCreateTaskModal();
+    await loadDashboard();
+    alert('Task created!');
+  }

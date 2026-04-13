@@ -1,0 +1,12 @@
+{
+  "name": "writeain",
+  "version": "1.0.0",
+  "description": "Collaborative Writing App with Supabase and Express",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

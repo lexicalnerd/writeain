@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WriteRain - Collaborative Writing</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&family=Fredoka:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Quicksand', sans-serif;
+      background: linear-gradient(135deg, #f0f8ff 0%, #fff0f5 100%);
+      color: #2c3e50;
+      min-height: 100vh;
+    }
+
+    h1,
+    h2,
+    h3,
+    .title {
+      font-family: 'Fredoka', sans-serif;
+      font-weight: 600;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes slideInLeft {
+      from {
+        opacity: 0;
+        transform: translateX(-30px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(30px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translateY(0px);
+      }
+
+      50% {
+        transform: translateY(-8px);
+      }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .slide-left {
+      animation: slideInLeft 0.6s ease-out;
+    }
+
+    .slide-right {
+      animation: slideInRight 0.6s ease-out;
+    }
+
+    /* Auth Screen */
+    .auth-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    .auth-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      width: 90%;
+      max-width: 1000px;
+    }
+
+    .auth-welcome {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      color: white;
+      animation: slideInLeft 0.8s ease-out;
+    }
+
+    .auth-welcome h1 {
+      font-size: 48px;
+      margin-bottom: 16px;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+
+    .auth-welcome p {
+      font-size: 16px;
+      line-height: 1.6;
+      opacity: 0.95;
+    }
+
+    .auth-box {
+      background: white;
+      padding: 40px;
+      border-radius: 24px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: slideInRight 0.8s ease-out;
+    }
+
+    .auth-tabs {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 32px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    .auth-tab {
+      padding: 12px 24px;
+      border: none;
+      background: none;
+      font-family: 'Fredoka', sans-serif;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      color: #999;
+      border-bottom: 3px solid transparent;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+
+    .auth-tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .auth-tab:hover {
+      color: #667eea;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .form-group label {
+      display: block;
+      font-family: 'Fredoka', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 14px;
+      transition: all 0.3s ease;
+      background: white;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .form-group input::placeholder {
+      color: #bbb;
+    }
+
+    .btn {
+      padding: 14px 28px;
+      border: none;
+      border-radius: 12px;
+      font-family: 'Fredoka', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+    }
+
+    .btn-primary:active {
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: white;
+      color: #667eea;
+      border: 2px solid #667eea;
+    }
+
+    .btn-secondary:hover {
+      background: #f9f9f9;
+      transform: translateY(-2px);
+    }
+
+    .success-message {
+      padding: 12px 16px;
+      background: #d4edda;
+      color: #155724;
+      border-radius: 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      animation: slideInLeft 0.4s ease-out;
+    }
+
+    .error-message {
+      padding: 12px 16px;
+      background: #f8d7da;
+      color: #721c24;
+      border-radius: 12px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      animation: slideInLeft 0.4s ease-out;
+    }
+
+    /* Dashboard */
+    .dashboard {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 28px;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    .sidebar {
+      background: white;
+      padding: 24px;
+      border-radius: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      height: fit-content;
+      animation: slideInLeft 0.8s ease-out;
+    }
+
+    .sidebar h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #667eea;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 16px;
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: linear-gradient(135deg, #f5f7ff 0%, #fff0f5 100%);
+      border-radius: 16px;
+      margin-bottom: 24px;
+      animation: fadeIn 0.8s ease-out 0.2s both;
+    }
+
+    .user-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-family: 'Fredoka', sans-serif;
+      font-weight: 700;
+      font-size: 20px;
+    }
+
+    .user-info h4 {
+      font-family: 'Fredoka', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      color: #2c3e50;
+      margin-bottom: 4px;
+    }
+
+    .user-info p {
+      font-size: 12px;
+      color: #999;
+    }
+
+    .sidebar-item {
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #666;
+      border: 2px solid transparent;
+      transition: all 0.3s ease;
+      font-weight: 500;
+    }
+
+    .sidebar-item:hover {
+      background: #f9f9f9;
+      transform: translateX(4px);
+    }
+
+    .sidebar-item.active {
+      background: linear-gradient(135deg, #f5f7ff 0%, #fff0f5 100%);
+      border-color: #667eea;
+      color: #667eea;
+    }
+
+    .sidebar-divider {
+      height: 1px;
+      background: #f0f0f0;
+      margin: 16px 0;
+    }
+
+    /* Main Content */
+    .content {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      padding: 32px;
+      animation: slideInRight 0.8s ease-out;
+    }
+
+    .content h2 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+
+    .content-meta {
+      font-size: 14px;
+      color: #999;
+      margin-bottom: 28px;
+    }
+
+    /* Task Grid */
+    .task-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .task-card {
+      background: linear-gradient(135deg, #f5f7ff 0%, #fff0f5 100%);
+      border: 2px solid #f0f0f0;
+      border-radius: 16px;
+      padding: 20px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .task-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .task-card:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 12px 30px rgba(102, 126, 234, 0.2);
+      border-color: #667eea;
+    }
+
+    .task-card h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      color: #2c3e50;
+    }
+
+    .task-card p {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    .task-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: 'Fredoka', sans-serif;
+    }
+
+    .badge.draft {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .badge.in-review {
+      background: #cfe2ff;
+      color: #084298;
+    }
+
+    .badge.approved {
+      background: #d1e7dd;
+      color: #0f5132;
+    }
+
+    /* Editor */
+    .editor-container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 28px;
+    }
+
+    .editor-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+    }
+
+    .editor-header h2 {
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #f0f0f0;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-btn {
+      padding: 10px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      background: white;
+      cursor: pointer;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      color: #666;
+    }
+
+    .toolbar-btn:hover {
+      border-color: #667eea;
+      color: #667eea;
+      transform: translateY(-2px);
+    }
+
+    .toolbar-btn.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-color: transparent;
+    }
+
+    .draft-text {
+      padding: 24px;
+      border: 2px solid #e0e0e0;
+      border-radius: 16px;
+      background: white;
+      line-height: 1.8;
+      font-size: 15px;
+      min-height: 400px;
+      transition: all 0.3s ease;
+      word-wrap: break-word;
+    }
+
+    .draft-text:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    .draft-text.editing {
+      background: linear-gradient(135deg, #f5f7ff 0%, #fff0f5 100%);
+    }
+
+    .helper-text {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: linear-gradient(135deg, #f0f8ff 0%, #fff0f5 100%);
+      border-radius: 12px;
+      font-size: 13px;
+      color: #667eea;
+      font-weight: 500;
+    }
+
+    /* Sidebar Sections */
+    .sidebar-section {
+      margin-bottom: 28px;
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .sidebar-section h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #667eea;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+
+    .checklist {
+      list-style: none;
+    }
+
+    .checklist li {
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: #f9f9f9;
+      border-radius: 10px;
+      font-size: 13px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      transition: all 0.3s ease;
+    }
+
+    .checklist li:hover {
+      background: #f0f0f0;
+    }
+
+    .checklist input[type="checkbox"] {
+      margin-top: 3px;
+      cursor: pointer;
+      width: 18px;
+      height: 18px;
+      accent-color: #667eea;
+    }
+
+    .checklist label {
+      cursor: pointer;
+      flex: 1;
+      color: #666;
+    }
+
+    .comment {
+      padding: 12px;
+      background: #f9f9f9;
+      border-radius: 12px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      border-left: 3px solid #667eea;
+      transition: all 0.3s ease;
+    }
+
+    .comment:hover {
+      background: #f0f0f0;
+      transform: translateX(4px);
+    }
+
+    .comment-author {
+      font-weight: 600;
+      color: #2c3e50;
+      font-family: 'Fredoka', sans-serif;
+    }
+
+    .comment-time {
+      color: #999;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .comment-text {
+      margin-top: 6px;
+      color: #555;
+    }
+
+    .new-comment {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .new-comment input {
+      padding: 10px 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-family: 'Quicksand', sans-serif;
+      font-size: 13px;
+      transition: all 0.3s ease;
+    }
+
+    .new-comment input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .revision-item {
+      padding: 10px 12px;
+      background: #f9f9f9;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      border-left: 3px solid #ddd;
+      transition: all 0.3s ease;
+    }
+
+    .revision-item:hover {
+      background: #f0f0f0;
+      transform: translateX(4px);
+    }
+
+    .revision-item.active {
+      border-left-color: #667eea;
+      background: rgba(102, 126, 234, 0.1);
+    }
+
+    .revision-time {
+      color: #999;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    .revision-author {
+      font-weight: 600;
+      color: #2c3e50;
+    }
+
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 24px;
+      padding: 40px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .modal-header {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      font-family: 'Fredoka', sans-serif;
+      color: #2c3e50;
+    }
+
+    .modal-close {
+      float: right;
+      font-size: 28px;
+      cursor: pointer;
+      color: #999;
+      transition: all 0.3s ease;
+      font-weight: 300;
+    }
+
+    .modal-close:hover {
+      color: #667eea;
+      transform: scale(1.2);
+    }
+
+    /* Hidden */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f5f5f5;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #ddd;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #bbb;
+    }
+
+    /* Highlights */
+    .author-highlight {
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .show-highlights .author-highlight {
+      background-color: var(--author-bg);
+      border-bottom-color: var(--author-color);
+    }
+
+    .author-legend {
+      margin-top: 20px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      border: 1px dashed #dee2e6;
+    }
+
+    .author-legend h4 {
+      font-size: 13px;
+      margin-bottom: 12px;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .legend-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 8px;
+      background: white;
+      border-radius: 6px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-container">
+      <div class="auth-welcome">
+        <h1>WriteRain</h1>
+        <p>A cozy space where students and teachers collaborate on writing through friendly feedback and revision. Grow
+          your skills together!</p>
+      </div>
+
+      <div class="auth-box">
+        <div class="auth-tabs">
+          <button class="auth-tab active" onclick="switchTab('login')">Login</button>
+          <button class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+        </div>
+
+        <div id="loginForm">
+          <div id="loginMessage"></div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="loginEmail" placeholder="your@email.com">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="loginPassword" placeholder="••••••••">
+          </div>
+          <button class="btn btn-primary" onclick="handleLogin()">Login</button>
+        </div>
+
+        <div id="signupForm" class="hidden">
+          <div id="signupMessage"></div>
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" id="signupName" placeholder="Your name">
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="signupEmail" placeholder="your@email.com">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="signupPassword" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select id="signupRole">
+              <option value="student">Student</option>
+              <option value="teacher">Teacher</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="handleSignup()">Create Account</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="appContainer" class="hidden">
+    <div class="container">
+      <div class="dashboard">
+        <div class="sidebar">
+          <div class="user-profile">
+            <div class="user-avatar" id="userAvatarIcon"></div>
+            <div class="user-info">
+              <h4 id="userNameDisplay"></h4>
+              <p id="userRoleDisplay"></p>
+            </div>
+          </div>
+
+          <div id="tasksList"></div>
+
+          <button class="btn btn-primary" id="newTaskBtn" onclick="openCreateTaskModal()" style="margin-top: 16px;">+
+            New Task</button>
+
+          <div class="sidebar-divider"></div>
+
+          <div class="sidebar-item" onclick="logout()">🚪 Logout</div>
+        </div>
+
+        <div id="mainContent" class="content">
+          <div id="dashboardView">
+            <h2>Writing Tasks</h2>
+            <p class="content-meta">Click a task to start collaborating and providing feedback</p>
+            <div class="task-grid" id="taskGrid"></div>
+          </div>
+
+          <div id="editorView" class="hidden">
+            <div class="editor-header">
+              <div>
+                <h2 id="taskTitle"></h2>
+                <p class="content-meta"><span id="revisionLabel"></span></p>
+              </div>
+              <div class="toolbar">
+                <button class="toolbar-btn" id="editBtn" onclick="toggleEditMode()">✍️ Edit Draft</button>
+                <button class="toolbar-btn" id="highlightBtn" onclick="toggleHighlights()">🏷️ Show Authors</button>
+                <div style="flex: 1"></div>
+                <button class="toolbar-btn" onclick="saveRevision()">💾 Save Revision</button>
+                <button class="toolbar-btn" onclick="goBack()">← Back</button>
+              </div>
+            </div>
+
+            <div class="editor-container">
+              <div>
+                <div id="draftText" class="draft-text" contenteditable="false"></div>
+                <div id="authorLegend" class="author-legend hidden">
+                  <h4>Contribution Map</h4>
+                  <div id="authorLegendItems" class="legend-items"></div>
+                </div>
+                <div class="helper-text">💡 Collaborate together: anyone can edit directly and add inline comments.
+                </div>
+              </div>
+
+              <div>
+                <div class="sidebar-section">
+                  <h3>Feedback Checklist</h3>
+                  <ul class="checklist" id="checklistItems"></ul>
+                </div>
+
+                <div class="sidebar-section">
+                  <h3>Comments</h3>
+                  <div id="commentsList" style="max-height: 500px; overflow-y: auto;"></div>
+                  <div class="new-comment">
+                    <input type="text" id="newCommentText" placeholder="Add a comment...">
+                    <button class="btn btn-primary" onclick="addComment()"
+                      style="padding: 10px 16px; margin: 0;">Post</button>
+                  </div>
+                </div>
+
+                <div class="sidebar-section">
+                  <h3>Revisions</h3>
+                  <div id="revisionsList" style="max-height: 400px; overflow-y: auto;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="createTaskModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-close" onclick="closeCreateTaskModal()">×</div>
+      <div class="modal-header">Create a New Task</div>
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div class="form-group">
+          <label>Task Title</label>
+          <input type="text" id="newTaskTitle" placeholder="e.g., Narrative Essay">
+        </div>
+        <div class="form-group">
+          <label>Instructions</label>
+          <textarea id="newTaskInstructions" placeholder="Write your task instructions here..."
+            style="min-height: 100px; font-family: 'Quicksand', sans-serif; padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 12px; resize: vertical;"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Feedback Checklist (one per line)</label>
+          <textarea id="newTaskChecklist"
+            placeholder="Does the introduction engage?&#10;Is the main idea clear?&#10;Are there specific examples?"
+            style="min-height: 100px; font-family: 'Quicksand', sans-serif; padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 12px; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn btn-secondary" onclick="closeCreateTaskModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="createTask()">Create Task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+
+  const result = await db.registerUser(email, password, name, role);
+  if (result.success) {
+  showMessage('signupMessage', 'Account created! Please log in.', false);
+  setTimeout(() => switchTab('login'), 2000);
+  } else {
+  showMessage('signupMessage', result.message, true);
+  }
+  }
+
+  async function logout() {
+  await db.logoutUser();
+  location.reload();
+  }
+
+  // Dashboard functions
+
+
+  async function loadDashboard() {
+  const taskGrid = document.getElementById('taskGrid');
+  const tasksList = document.getElementById('tasksList');
+
+  taskGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px;">Loading tasks...</div>';
+  tasksList.innerHTML = '';
+
+  const tasks = await db.getTasks();
+  taskGrid.innerHTML = '';
+
+  for (const task of tasks) {
+  const revisions = await db.getTaskRevisions(task.id);
+  const html = `
+  <div class="task-card" onclick="openTask('${task.id}')">
+    <h3>${task.title}</h3>
+    <p>${task.instructions.substring(0, 60)}...</p>
+    <div class="task-meta">
+      <span class="badge ${task.status}">${task.status}</span>
+      <span>${revisions.length} revisions</span>
+    </div>
+  </div>
+  `;
+  taskGrid.innerHTML += html;
+
+  const sidebarItem = document.createElement('div');
+  sidebarItem.className = 'sidebar-item';
+  sidebarItem.textContent = task.title.substring(0, 20) + '...';
+  sidebarItem.onclick = () => openTask(task.id);
+  tasksList.appendChild(sidebarItem);
+  }
+  }
+
+  async function openTask(taskId) {
+  currentTaskId = taskId;
+  const task = await db.getTask(taskId);
+  const revisions = await db.getTaskRevisions(taskId);
+  const currentRevision = revisions[revisions.length - 1];
+
+  document.getElementById('dashboardView').classList.add('hidden');
+  document.getElementById('editorView').classList.remove('hidden');
+
+  document.getElementById('taskTitle').textContent = task.title;
+  document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${currentRevision?.author ||
+  'Unknown'}`;
+
+  // Load content with highlights if enabled
+  await renderDraftContent(taskId);
+
+  document.getElementById('editBtn').classList.remove('hidden');
+
+  loadChecklistItems(task.checklist);
+  loadComments(taskId);
+  loadRevisions(taskId);
+  }
+
+  let highlightsEnabled = false;
+
+  async function toggleHighlights() {
+  highlightsEnabled = !highlightsEnabled;
+  const btn = document.getElementById('highlightBtn');
+  btn.classList.toggle('active', highlightsEnabled);
+  btn.textContent = highlightsEnabled ? '🏷️ Hide Authors' : '🏷️ Show Authors';
+
+  document.getElementById('authorLegend').classList.toggle('hidden', !highlightsEnabled);
+  document.getElementById('draftText').classList.toggle('show-highlights', highlightsEnabled);
+
+  await renderDraftContent(currentTaskId);
+  }
+
+  function getAuthorColor(name) {
+  if (!name) return { bg: '#eee', border: '#ccc' };
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) { hash=name.charCodeAt(i) + ((hash << 5) - hash); } const h=Math.abs(hash) %
+    360; return { bg: `hsla(${h}, 70%, 90%, 0.8)`, border: `hsla(${h}, 70%, 40%, 1)` }; } async function
+    renderDraftContent(taskId) { const revisions=await db.getTaskRevisions(taskId); const
+    editor=document.getElementById('draftText'); const legendItems=document.getElementById('authorLegendItems'); if
+    (revisions.length===0) return; const currentRevision=revisions[revisions.length - 1]; if (!highlightsEnabled) {
+    editor.textContent=currentRevision.content; return; } // Authorship detection logic const dmp=new
+    diff_match_patch(); let textWithAuthors=[{ text: revisions[0].content, author: revisions[0].author }]; for (let i=1;
+    i < revisions.length; i++) { const rev=revisions[i]; const newContent=rev.content; const
+    oldContent=revisions[i-1].content; const diffs=dmp.diff_main(oldContent, newContent);
+    dmp.diff_cleanupSemantic(diffs); let newAttribution=[]; let oldIdx=0; diffs.forEach(([type, text])=> {
+    if (type === 0) { // Unchanged
+    let remaining = text.length;
+    while (remaining > 0 && oldIdx < textWithAuthors.length) { const segment=textWithAuthors[oldIdx]; if
+      (segment.text.length <=remaining) { newAttribution.push({ ...segment }); remaining -=segment.text.length;
+      oldIdx++; } else { newAttribution.push({ text: segment.text.substring(0, remaining), author: segment.author });
+      textWithAuthors[oldIdx].text=segment.text.substring(remaining); remaining=0; } } } else if (type===1) { // Added
+      newAttribution.push({ text, author: rev.author }); } else if (type===-1) { // Deleted let remaining=text.length;
+      while (remaining> 0 && oldIdx < textWithAuthors.length) { const segment=textWithAuthors[oldIdx]; if
+        (segment.text.length <=remaining) { remaining -=segment.text.length; oldIdx++; } else {
+        textWithAuthors[oldIdx].text=segment.text.substring(remaining); remaining=0; } } } });
+        textWithAuthors=newAttribution; } // Render HTML editor.innerHTML='' ; legendItems.innerHTML='' ; const
+        authors=new Set(); textWithAuthors.forEach(seg=> {
+        if (!seg.text) return;
+        const span = document.createElement('span');
+        span.className = 'author-highlight';
+        const colors = getAuthorColor(seg.author);
+        span.style.setProperty('--author-bg', colors.bg);
+        span.style.setProperty('--author-color', colors.border);
+        span.textContent = seg.text;
+        span.title = `Written by ${seg.author}`;
+        editor.appendChild(span);
+        authors.add(seg.author);
+        });
+
+        authors.forEach(author => {
+        const colors = getAuthorColor(author);
+        const div = document.createElement('div');
+        div.className = 'legend-item';
+        div.innerHTML = `
+        <div class="legend-swatch" style="background: ${colors.bg}; border: 1px solid ${colors.border}"></div>
+        <span>${author}</span>
+        `;
+        legendItems.appendChild(div);
+        });
+        }
+
+        function goBack() {
+        editMode = false;
+        document.getElementById('editorView').classList.add('hidden');
+        document.getElementById('dashboardView').classList.remove('hidden');
+        document.getElementById('draftText').contentEditable = false;
+        document.getElementById('draftText').classList.remove('editing');
+        currentTaskId = null;
+        }
+
+        async function toggleEditMode() {
+        const user = db.getCurrentUser();
+
+        editMode = !editMode;
+
+        // Disable highlights when editing for cleaner experience
+        if (editMode && highlightsEnabled) {
+        await toggleHighlights();
+        }
+
+        const editor = document.getElementById('draftText');
+        editor.contentEditable = editMode;
+        editor.classList.toggle('editing', editMode);
+        document.getElementById('editBtn').classList.toggle('active', editMode);
+
+        if (editMode) {
+        editor.focus();
+        }
+        }
+
+        async function saveRevision() {
+        const content = document.getElementById('draftText').textContent;
+        const user = db.getCurrentUser();
+
+        await db.addRevision(currentTaskId, content, user.name);
+
+        editMode = false;
+        document.getElementById('draftText').contentEditable = false;
+        document.getElementById('draftText').classList.remove('editing');
+        document.getElementById('editBtn').classList.remove('active');
+
+        const revisions = await db.getTaskRevisions(currentTaskId);
+        document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${user.name}`;
+
+        loadRevisions(currentTaskId);
+        await renderDraftContent(currentTaskId);
+        alert('Revision saved!');
+        }
+
+        function loadChecklistItems(checklist) {
+        const listEl = document.getElementById('checklistItems');
+        listEl.innerHTML = '';
+        const user = db.getCurrentUser();
+
+        checklist.forEach((item, idx) => {
+        const li = document.createElement('li');
+        // Handle both old (string) and new (object) formats
+        const text = typeof item === 'string' ? item : item.text;
+        const checked = typeof item === 'object' ? item.checked : (item.checked || false);
+
+        const isTeacher = user.role === 'teacher';
+        const isDisabled = !isTeacher ? 'disabled' : '';
+        const checkedAttr = checked ? 'checked' : '';
+
+        li.innerHTML = `
+        <input type="checkbox" id="check-${idx}" ${isDisabled} ${checkedAttr}
+          onchange="toggleChecklistItem(${idx}, this.checked)">
+        <label for="check-${idx}" style="${!isTeacher ? 'cursor: default;' : ''}">${text}</label>
+        `;
+        listEl.appendChild(li);
+        });
+
+        if (user.role !== 'teacher') {
+        const helper = document.createElement('div');
+        helper.className = 'helper-text';
+        helper.style.marginTop = '10px';
+        helper.style.fontSize = '11px';
+        helper.innerHTML = '🔒 Only teachers can check feedback items.';
+        listEl.appendChild(helper);
+        }
+        }
+
+        async function toggleChecklistItem(idx, checked) {
+        const task = await db.getTask(currentTaskId);
+        if (task && task.checklist[idx]) {
+        task.checklist[idx].checked = checked;
+        await db.updateChecklist(currentTaskId, task.checklist);
+        }
+        }
+
+        async function loadComments(taskId) {
+        const commentsList = document.getElementById('commentsList');
+        const taskComments = await db.getTaskComments(taskId);
+        commentsList.innerHTML = '';
+
+        taskComments.forEach(comment => {
+        const div = document.createElement('div');
+        div.className = 'comment';
+        div.innerHTML = `
+        <div class="comment-author">${comment.author}</div>
+        <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
+        <div class="comment-text">${comment.text}</div>
+        `;
+        commentsList.appendChild(div);
+        });
+        }
+
+        async function addComment() {
+        const text = document.getElementById('newCommentText').value.trim();
+        if (!text) {
+        alert('Please write a comment');
+        return;
+        }
+
+        const user = db.getCurrentUser();
+        await db.addComment(currentTaskId, user.name, text);
+        document.getElementById('newCommentText').value = '';
+        loadComments(currentTaskId);
+        }
+
+        async function loadRevisions(taskId) {
+        const revisionsList = document.getElementById('revisionsList');
+        const revisions = await db.getTaskRevisions(taskId);
+        revisionsList.innerHTML = '';
+
+        revisions.forEach((rev, idx) => {
+        const div = document.createElement('div');
+        div.className = 'revision-item';
+        if (idx === revisions.length - 1) div.classList.add('active');
+        div.innerHTML = `
+        <div class="revision-author">Rev ${idx + 1}</div>
+        <div class="revision-time">${new Date(rev.timestamp).toLocaleString()}</div>
+        <div style="color: #666; margin-top: 4px; font-size: 11px;">by ${rev.author}</div>
+        `;
+        div.onclick = () => {
+        document.getElementById('draftText').textContent = rev.content;
+        document.getElementById('draftText').contentEditable = false;
+        editMode = false;
+        document.getElementById('editBtn').classList.remove('active');
+        document.querySelectorAll('.revision-item').forEach(item => item.classList.remove('active'));
+        div.classList.add('active');
+
+        // Disable highlights when viewing history
+        if (highlightsEnabled) {
+        highlightsEnabled = false;
+        const btn = document.getElementById('highlightBtn');
+        btn.classList.remove('active');
+        btn.textContent = '🏷️ Show Authors';
+        document.getElementById('authorLegend').classList.add('hidden');
+        document.getElementById('draftText').classList.remove('show-highlights');
+        }
+        };
+        revisionsList.appendChild(div);
+        });
+        }
+
+        function openCreateTaskModal() {
+        document.getElementById('createTaskModal').classList.add('active');
+        }
+
+        function closeCreateTaskModal() {
+        document.getElementById('createTaskModal').classList.remove('active');
+        document.getElementById('newTaskTitle').value = '';
+        document.getElementById('newTaskInstructions').value = '';
+        document.getElementById('newTaskChecklist').value = '';
+        }
+
+        async function createTask() {
+        const title = document.getElementById('newTaskTitle').value.trim();
+        const instructions = document.getElementById('newTaskInstructions').value.trim();
+        const checklist = document.getElementById('newTaskChecklist').value.trim();
+
+        if (!title || !instructions || !checklist) {
+        alert('Please fill in all fields');
+        return;
+        }
+
+        const user = db.getCurrentUser();
+        await db.createTask(title, instructions, checklist, user.name);
+
+        closeCreateTaskModal();
+        loadDashboard();
+        alert('Task created!');
+        }
+
+
+        </script>
+
+</body>
+
+</html>
