@@ -191,12 +191,16 @@
     document.getElementById('userRoleDisplay').textContent = user.role;
     document.getElementById('userAvatarIcon').textContent = user.name.charAt(0).toUpperCase();
     
-    // Hide new task button for students
+    // Hide teacher-only features from students
     const newTaskBtn = document.getElementById('newTaskBtn');
+    const highlightBtn = document.getElementById('highlightBtn');
+    
     if (user.role === 'teacher') {
       newTaskBtn.classList.remove('hidden');
+      highlightBtn.classList.remove('hidden');
     } else {
       newTaskBtn.classList.add('hidden');
+      highlightBtn.classList.add('hidden');
     }
   }
 
@@ -331,6 +335,10 @@
     await renderDraftContent(taskId);
 
     document.getElementById('editBtn').classList.remove('hidden');
+
+    // Show/hide feedback section based on role
+    const user = db.getCurrentUser();
+    document.getElementById('feedbackSection').classList.toggle('hidden', user.role !== 'teacher');
 
     loadChecklistItems(task.checklist);
     await loadComments(taskId);
