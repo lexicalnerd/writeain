@@ -6,23 +6,59 @@
         }
 
         async init() {
-            // Fetch config from our Express server (keeps keys safe)
-            const config = await fetch('/api/config').then(res => res.json());
-            _supabase = supabase.createClient(config.url, config.key);
+            try {
+                // Fetch config from our Express server
+                const response = await fetch('/api/config');
+                if (!response.ok) throw new Error('Failed to fetch config');
+                const config = await response.json();
 
-            const { data: { session } } = await _supabase.auth.getSession();
-            if (session) {
-                this.currentUser = {
-                    id: session.user.id,
-                    email: session.user.email,
-                    name: session.user.user_metadata.full_name,
-                    role: session.user.user_metadata.role
-                };
+                // Validate URL format (must be a valid Supabase URL)
+                if (!config.url || !config.url.startsWith('http')) {
+                    this.showSetupWarning();
+                    return null;
+                }
+
+                _supabase = supabase.createClient(config.url, config.key);
+
+                const { data: { session }, error } = await _supabase.auth.getSession();
+                if (error) throw error;
+                if (session) {
+                    this.currentUser = {
+                        id: session.user.id,
+                        email: session.user.email,
+                        name: session.user.user_metadata.full_name,
+                        role: session.user.user_metadata.role
+                    };
+                }
+                return this.currentUser;
+            } catch (err) {
+                console.error("Initialization Error:", err);
+                this.showSetupWarning();
+                return null;
             }
-            return this.currentUser;
+        }
+
+        showSetupWarning() {
+            const authScreen = document.getElementById('authScreen');
+            if (!authScreen) return;
+            
+            const warning = document.createElement('div');
+            warning.className = 'setup-warning';
+            warning.style.cssText = 'background: #fff4f4; border: 1px solid #ffcdd2; color: #b71c1c; padding: 20px; border-radius: 12px; margin-bottom: 24px; font-weight: 500; line-height: 1.6;';
+            warning.innerHTML = `
+                <h3 style="margin-top:0">⚠️ Configuration Required</h3>
+                <p>It looks like your Supabase connection is not set up correctly.</p>
+                <ol style="margin-bottom:0">
+                    <li>Create a <code>.env</code> file in the project root.</li>
+                    <li>Add your <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code>.</li>
+                    <li>Restart the server using <code>node server.js</code>.</li>
+                </ol>
+            `;
+            authScreen.prepend(warning);
         }
 
         async registerUser(email, password, name, role) {
+            if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
             const { data, error } = await _supabase.auth.signUp({
                 email,
                 password,
@@ -35,6 +71,7 @@
         }
 
         async loginUser(email, password) {
+            if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
             const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
             if (error) return { success: false, message: error.message };
             
@@ -222,12 +259,22 @@
       return;
     }
 
+    if (password.length < 6) {
+      showMessage('signupMessage', 'Password must be at least 6 characters long', true);
+      return;
+    }
+
     const result = await db.registerUser(email, password, name, role);
     if (result.success) {
       showMessage('signupMessage', 'Account created! Please log in.', false);
       setTimeout(() => switchTab('login'), 2000);
     } else {
-      showMessage('signupMessage', result.message, true);
+      // Handle the case where the user might already exist
+      let msg = result.message;
+      if (msg.includes('already registered')) {
+        msg = "Email already in use. Try logging in!";
+      }
+      showMessage('signupMessage', msg, true);
     }
   }
 
