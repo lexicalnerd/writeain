@@ -932,21 +932,19 @@
     commentsList.innerHTML = '';
 
     taskComments.forEach(comment => {
-      // Privacy filter: students only see their own comments. Teachers see everything.
-      if (user.role === 'teacher' || comment.author === user.name) {
-        const div = document.createElement('div');
-        div.className = 'comment';
-        div.innerHTML = `
-          <div class="comment-author">${comment.author} ${comment.author === user.name ? '(You)' : ''}</div>
-          <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
-          <div class="comment-text">${comment.text}</div>
-        `;
-        commentsList.appendChild(div);
-      }
+      // Everyone can see all comments now
+      const div = document.createElement('div');
+      div.className = 'comment';
+      div.innerHTML = `
+        <div class="comment-author">${comment.author} ${comment.author === user.name ? '(You)' : ''}</div>
+        <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
+        <div class="comment-text">${comment.text}</div>
+      `;
+      commentsList.appendChild(div);
     });
 
-    if (commentsList.innerHTML === '' && user.role !== 'teacher') {
-        commentsList.innerHTML = '<div style="text-align:center; color:#999; padding:20px; font-size:13px;">No private comments yet. Share your thoughts with the teacher!</div>';
+    if (commentsList.innerHTML === '') {
+        commentsList.innerHTML = '<div style="text-align:center; color:#999; padding:20px; font-size:13px;">No comments yet. Be the first to start the conversation!</div>';
     }
   }
 
