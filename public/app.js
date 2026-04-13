@@ -221,9 +221,11 @@
     if (user.role === 'teacher') {
       newTaskBtn.classList.remove('hidden');
       highlightBtn.classList.remove('hidden');
+      document.getElementById('editBtn').classList.remove('hidden');
     } else {
       newTaskBtn.classList.add('hidden');
       highlightBtn.classList.add('hidden');
+      document.getElementById('editBtn').classList.add('hidden');
     }
   }
 
@@ -362,6 +364,11 @@
     // Show/hide teacher-only sections based on role
     const user = db.getCurrentUser();
     const isTeacher = user.role === 'teacher';
+    
+    // Toggle focused mode for students
+    const editorContainer = document.querySelector('.editor-container');
+    editorContainer.classList.toggle('focused-mode', !isTeacher);
+
     document.getElementById('feedbackSection').classList.toggle('hidden', !isTeacher);
     document.getElementById('commentsSection').classList.toggle('hidden', !isTeacher);
     document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
@@ -370,6 +377,11 @@
       await populateStudentSelector(taskId);
     }
 
+    // Auto-enable editing for everyone
+    const editor = document.getElementById('draftText');
+    editor.contentEditable = true;
+    editor.classList.add('editing');
+    
     loadChecklistItems([]); // Clear checklist until student is selected
     await loadComments(taskId);
     await loadRevisions(taskId);
