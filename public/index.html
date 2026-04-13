@@ -945,17 +945,17 @@
                   <ul class="checklist" id="checklistItems"></ul>
                 </div>
 
-                <div class="sidebar-section">
+                <div class="sidebar-section" id="commentsSection">
                   <h3>Comments</h3>
                   <div id="commentsList" style="max-height: 500px; overflow-y: auto;"></div>
-                  <div class="new-comment">
-                    <input type="text" id="newCommentText" placeholder="Add a comment...">
-                    <button class="btn btn-primary" onclick="addComment()"
-                      style="padding: 10px 16px; margin: 0;">Post</button>
+                  
+                  <div class="new-comment" style="margin-top: 20px;">
+                    <textarea id="newCommentText" placeholder="Add a comment or feedback..." style="width: 100%; min-height: 80px; padding: 12px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 8px; font-family: inherit; font-size: 13px;"></textarea>
+                    <button class="btn btn-primary btn-sm" onclick="addComment()" style="width: 100%">Post Comment</button>
                   </div>
                 </div>
 
-                <div class="sidebar-section">
+                <div class="sidebar-section" id="revisionsSection">
                   <h3>Revisions</h3>
                   <div id="revisionsList" style="max-height: 400px; overflow-y: auto;"></div>
                 </div>

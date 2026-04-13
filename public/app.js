@@ -336,9 +336,12 @@
 
     document.getElementById('editBtn').classList.remove('hidden');
 
-    // Show/hide feedback section based on role
+    // Show/hide teacher-only sections based on role
     const user = db.getCurrentUser();
-    document.getElementById('feedbackSection').classList.toggle('hidden', user.role !== 'teacher');
+    const isTeacher = user.role === 'teacher';
+    document.getElementById('feedbackSection').classList.toggle('hidden', !isTeacher);
+    document.getElementById('commentsSection').classList.toggle('hidden', !isTeacher);
+    document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
 
     loadChecklistItems(task.checklist);
     await loadComments(taskId);
