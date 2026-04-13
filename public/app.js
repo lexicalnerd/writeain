@@ -1,62 +1,51 @@
-    let _supabase; // Initialized in init()
+let _supabase; // Initialized in init()
 
-    class WritingDB {
-        constructor() {
-            this.currentUser = null;
-        }
+class WritingDB {
+  constructor() {
+    this.currentUser = null;
+  }
 
-        async init() {
-            try {
-                // Fetch config from our Express server
-                const response = await fetch('/api/config');
-                if (!response.ok) throw new Error('Failed to fetch config');
-                const config = await response.json();
+  async init() {
+    try {
+      // Fetch config from our Express server
+      const response = await fetch('/api/config');
+      if (!response.ok) throw new Error('Failed to fetch config');
+      const config = await response.json();
 
-                // Validate URL format (must be a valid Supabase URL)
-                if (!config.url || !config.url.startsWith('http')) {
-                    this.showSetupWarning();
-                    return null;
-                }
+      // Validate URL format (must be a valid Supabase URL)
+      if (!config.url || !config.url.startsWith('http')) {
+        this.showSetupWarning();
+        return null;
+      }
 
-                _supabase = supabase.createClient(config.url, config.key);
+      _supabase = supabase.createClient(config.url, config.key);
 
-                const { data: { session }, error } = await _supabase.auth.getSession();
-                if (error) throw error;
-                if (session) {
-                    this.currentUser = {
-                        id: session.user.id,
-                        email: session.user.email,
-                        name: session.user.user_metadata.full_name,
-                        role: session.user.user_metadata.role
-                    };
+      const { data: { session }, error } = await _supabase.auth.getSession();
+      if (error) throw error;
+      if (session) {
+        this.currentUser = {
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.user_metadata.full_name,
+          role: session.user.user_metadata.role
+        };
+      }
+      return this.currentUser;
+    } catch (err) {
+      console.error("Initialization Error:", err);
+      this.showSetupWarning();
+      return null;
+    }
+  }
 
-                    // SELF-HEALING: Ensure a profile exists for this user
-                    const { data: profile } = await _supabase.from('profiles').select('*').eq('id', session.user.id).single();
-                    if (!profile) {
-                         await _supabase.from('profiles').insert([{
-                            id: session.user.id,
-                            email: this.currentUser.email,
-                            name: this.currentUser.name,
-                            role: this.currentUser.role
-                         }]);
-                    }
-                }
-                return this.currentUser;
-            } catch (err) {
-                console.error("Initialization Error:", err);
-                this.showSetupWarning();
-                return null;
-            }
-        }
+  showSetupWarning() {
+    const authScreen = document.getElementById('authScreen');
+    if (!authScreen) return;
 
-        showSetupWarning() {
-            const authScreen = document.getElementById('authScreen');
-            if (!authScreen) return;
-            
-            const warning = document.createElement('div');
-            warning.className = 'setup-warning';
-            warning.style.cssText = 'background: #fff4f4; border: 1px solid #ffcdd2; color: #b71c1c; padding: 20px; border-radius: 12px; margin-bottom: 24px; font-weight: 500; line-height: 1.6;';
-            warning.innerHTML = `
+    const warning = document.createElement('div');
+    warning.className = 'setup-warning';
+    warning.style.cssText = 'background: #fff4f4; border: 1px solid #ffcdd2; color: #b71c1c; padding: 20px; border-radius: 12px; margin-bottom: 24px; font-weight: 500; line-height: 1.6;';
+    warning.innerHTML = `
                 <h3 style="margin-top:0">⚠️ Configuration Required</h3>
                 <p>It looks like your Supabase connection is not set up correctly.</p>
                 <ol style="margin-bottom:0">
@@ -65,393 +54,382 @@
                     <li>Restart the server using <code>node server.js</code>.</li>
                 </ol>
             `;
-            authScreen.prepend(warning);
-        }
-
-        async registerUser(email, password, name, role) {
-            if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
-            const { data, error } = await _supabase.auth.signUp({
-                email,
-                password,
-                options: {
-                    data: { full_name: name, role: role }
-                }
-            });
-            if (error) return { success: false, message: error.message };
-            
-            // NEW: Create a public profile entry so the teacher can see the student in the list
-            await _supabase.from('profiles').insert([{ 
-                id: data.user.id, 
-                email: email, 
-                name: name, 
-                role: role 
-            }]);
-
-            return { success: true };
-        }
-
-        async getProfiles() {
-            const { data, error } = await _supabase
-                .from('profiles')
-                .select('*')
-                .eq('role', 'student')
-                .order('name', { ascending: true });
-            return data || [];
-        }
-
-        async loginUser(email, password) {
-            if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
-            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
-            if (error) return { success: false, message: error.message };
-            
-            this.currentUser = {
-                id: data.user.id,
-                email: data.user.email,
-                name: data.user.user_metadata.full_name,
-                role: data.user.user_metadata.role
-            };
-            return { success: true, user: this.currentUser };
-        }
-
-        getCurrentUser() {
-            return this.currentUser;
-        }
-
-        async logoutUser() {
-            await _supabase.auth.signOut();
-            this.currentUser = null;
-        }
-
-        async createTask(title, instructions, checklistText, createdBy) {
-            const checklist = checklistText.split('\n').filter(item => item.trim()).map(text => ({ text, checked: false }));
-            
-            const { data: task, error: taskError } = await _supabase
-                .from('tasks')
-                .insert([{ title, instructions, checklist, created_by: createdBy, status: 'draft' }])
-                .select()
-                .single();
-
-            if (taskError) throw taskError;
-
-            // Create initial revision
-            await this.addRevision(task.id, instructions, createdBy);
-            return task;
-        }
-
-        async getTasks() {
-            const { data, error } = await _supabase
-                .from('tasks')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (error) return [];
-            return data;
-        }
-
-        async getTask(taskId) {
-            const { data, error } = await _supabase
-                .from('tasks')
-                .select('*')
-                .eq('id', taskId)
-                .single();
-            return data;
-        }
-
-        async renameProfile(userId, newName) {
-            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
-            
-            try {
-                if (isUUID) {
-                    // 1. Try to update or create profile (Requires UUID)
-                    const { data: profile } = await _supabase.from('profiles').select('*').eq('id', userId).single();
-                    if (profile) {
-                        await _supabase.from('profiles').update({ name: newName }).eq('id', userId);
-                    } else {
-                        await _supabase.from('profiles').insert([{ id: userId, name: newName, role: 'student' }]);
-                    }
-                }
-                
-                // 2. Propagate name change to all other logs (Checklists, Revisions, Comments)
-                // We need to find the old name first if we only have a UUID
-                let oldName = userId;
-                if (isUUID) {
-                    const { data: p } = await _supabase.from('profiles').select('name').eq('id', userId).single();
-                    if (p) oldName = p.name;
-                }
-
-                // Update checklists
-                const { data: existing } = await _supabase.from('student_checklists').select('*').eq('student_id', userId).limit(1);
-                if (existing && existing.length > 0) {
-                    await _supabase.from('student_checklists').update({ student_name: newName }).eq('student_id', userId);
-                } else if (!isUUID) {
-                    await _supabase.from('student_checklists').insert([{ 
-                        student_id: userId, 
-                        student_name: newName, 
-                        task_id: '00000000-0000-0000-0000-000000000000',
-                        items: [] 
-                    }]);
-                }
-
-                // Update activity logs
-                await _supabase.from('revisions').update({ author: newName }).eq('author', oldName);
-                await _supabase.from('comments').update({ author: newName }).eq('author', oldName);
-            } catch (err) {
-                console.error("Rename failed:", err);
-                alert("Could not rename student. Check Supabase permissions.");
-            }
-            return true;
-        }
-
-        async deleteTask(taskId) {
-            const { error } = await _supabase
-                .from('tasks')
-                .delete()
-                .eq('id', taskId);
-            if (error) throw error;
-            return true;
-        }
-
-        async renameTask(taskId, newTitle) {
-            const { error } = await _supabase
-                .from('tasks')
-                .update({ title: newTitle })
-                .eq('id', taskId);
-            if (error) throw error;
-            return true;
-        }
-
-        async updateChecklist(taskId, checklist) {
-            await _supabase
-                .from('tasks')
-                .update({ checklist })
-                .eq('id', taskId);
-        }
-
-        async addRevision(taskId, content, author) {
-            const { data, error } = await _supabase
-                .from('revisions')
-                .insert([{ task_id: taskId, content, author }])
-                .select()
-                .single();
-            return data;
-        }
-
-        async getTaskRevisions(taskId) {
-            const { data, error } = await _supabase
-                .from('revisions')
-                .select('*')
-                .eq('task_id', taskId)
-                .order('timestamp', { ascending: true });
-            return data || [];
-        }
-
-        async addComment(taskId, author, text) {
-            const { data, error } = await _supabase
-                .from('comments')
-                .insert([{ task_id: taskId, author, text }])
-                .select()
-                .single();
-            return data;
-        }
-
-        async getStudentChecklist(taskId, studentId) {
-            const { data, error } = await _supabase
-                .from('student_checklists')
-                .select('*')
-                .eq('task_id', taskId)
-                .eq('student_id', studentId)
-                .single();
-            return data;
-        }
-
-        async updateStudentChecklist(taskId, studentId, studentName, items) {
-            const { data, error } = await _supabase
-                .from('student_checklists')
-                .upsert({ 
-                    task_id: taskId, 
-                    student_id: studentId, 
-                    student_name: studentName,
-                    items: items,
-                    updated_at: new Date().toISOString()
-                }, { onConflict: 'task_id,student_id' });
-            return data;
-        }
-
-        async getAllStudentChecklists() {
-            const { data, error } = await _supabase
-                .from('student_checklists')
-                .select('*');
-            if (error) console.error("Error fetching checklists:", error);
-            return data || [];
-        }
-
-        async getAllRevisions() {
-            const { data, error } = await _supabase
-                .from('revisions')
-                .select('*');
-            if (error) console.error("Error fetching all revisions:", error);
-            return data || [];
-        }
-
-        async getTaskComments(taskId) {
-            const { data, error } = await _supabase
-                .from('comments')
-                .select('*')
-                .eq('task_id', taskId)
-                .order('timestamp', { ascending: true });
-            return data || [];
-        }
-    }
-
-  const db = new WritingDB();
-  let currentTaskId = null;
-  let editMode = false;
-
-  // Initialize DB and Check Session
-  window.addEventListener('load', async () => {
-    const user = await db.init();
-    if (user) {
-      document.getElementById('authScreen').classList.add('hidden');
-      document.getElementById('appContainer').classList.remove('hidden');
-      updateUserProfileUI(user);
-      loadDashboard();
-    }
-  });
-
-  function updateUserProfileUI(user) {
-    document.getElementById('userNameDisplay').textContent = user.name;
-    document.getElementById('userRoleDisplay').textContent = user.role;
-    document.getElementById('userAvatarIcon').textContent = user.name.charAt(0).toUpperCase();
-    
-    // Hide teacher-only features from students
-    const newTaskBtn = document.getElementById('newTaskBtn');
-    const highlightBtn = document.getElementById('highlightBtn');
-    
-    if (user.role === 'teacher') {
-      newTaskBtn.classList.remove('hidden');
-      highlightBtn.classList.remove('hidden');
-      document.getElementById('editBtn').classList.remove('hidden');
-      document.getElementById('teacherNav').classList.remove('hidden');
-    } else {
-      newTaskBtn.classList.add('hidden');
-      highlightBtn.classList.add('hidden');
-      document.getElementById('editBtn').classList.add('hidden');
-      document.getElementById('teacherNav').classList.add('hidden');
-    }
+    authScreen.prepend(warning);
   }
 
-  function showView(viewName) {
-    document.getElementById('dashboardView').classList.add('hidden');
-    document.getElementById('studentsView').classList.add('hidden');
-    document.getElementById('editorView').classList.add('hidden');
-    
-    // Deactivate all sidebar items
-    document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
-
-    if (viewName === 'dashboard') {
-      document.getElementById('dashboardView').classList.remove('hidden');
-      loadDashboard();
-    } else if (viewName === 'students') {
-      document.getElementById('studentsView').classList.remove('hidden');
-      loadStudentsView();
-    }
-  }
-
-  // Auth functions
-  function switchTab(tab) {
-    const loginForm = document.getElementById('loginForm');
-    const signupForm = document.getElementById('signupForm');
-    const tabs = document.querySelectorAll('.auth-tab');
-
-    if (tab === 'login') {
-      loginForm.classList.remove('hidden');
-      signupForm.classList.add('hidden');
-      tabs[0].classList.add('active');
-      tabs[1].classList.remove('active');
-    } else {
-      loginForm.classList.add('hidden');
-      signupForm.classList.remove('hidden');
-      tabs[0].classList.remove('active');
-      tabs[1].classList.add('active');
-    }
-  }
-
-  function showMessage(elementId, message, isError = false) {
-    const element = document.getElementById(elementId);
-    element.innerHTML = `<div class="${isError ? 'error-message' : 'success-message'}">${message}</div>`;
-    setTimeout(() => {
-      element.innerHTML = '';
-    }, 4000);
-  }
-
-  async function handleLogin() {
-    const email = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value;
-
-    if (!email || !password) {
-      showMessage('loginMessage', 'Please fill in all fields', true);
-      return;
-    }
-
-    const result = await db.loginUser(email, password);
-    if (result.success) {
-      const user = result.user;
-      document.getElementById('authScreen').classList.add('hidden');
-      document.getElementById('appContainer').classList.remove('hidden');
-      updateUserProfileUI(user);
-      await loadDashboard();
-    } else {
-      showMessage('loginMessage', result.message, true);
-    }
-  }
-
-  async function handleSignup() {
-    const name = document.getElementById('signupName').value.trim();
-    const email = document.getElementById('signupEmail').value.trim();
-    const password = document.getElementById('signupPassword').value;
-    const role = document.getElementById('signupRole').value;
-
-    if (!name || !email || !password) {
-      showMessage('signupMessage', 'Please fill in all fields', true);
-      return;
-    }
-
-    if (password.length < 6) {
-      showMessage('signupMessage', 'Password must be at least 6 characters long', true);
-      return;
-    }
-
-    const result = await db.registerUser(email, password, name, role);
-    if (result.success) {
-      showMessage('signupMessage', 'Account created! Please log in.', false);
-      setTimeout(() => switchTab('login'), 2000);
-    } else {
-      // Handle the case where the user might already exist
-      let msg = result.message;
-      if (msg.includes('already registered')) {
-        msg = "Email already in use. Try logging in!";
+  async registerUser(email, password, name, role) {
+    if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
+    const { data, error } = await _supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name, role: role }
       }
-      showMessage('signupMessage', msg, true);
+    });
+    if (error) return { success: false, message: error.message };
+
+    return { success: true };
+  }
+
+  async getProfiles() {
+    return []; // DEPRECATED: discovery now handled via activity logs
+  }
+
+  async loginUser(email, password) {
+    if (!_supabase) return { success: false, message: "Database not initialized. Check your configuration." };
+    const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+    if (error) return { success: false, message: error.message };
+
+    this.currentUser = {
+      id: data.user.id,
+      email: data.user.email,
+      name: data.user.user_metadata.full_name,
+      role: data.user.user_metadata.role
+    };
+
+    return { success: true, user: this.currentUser };
+  }
+
+  getCurrentUser() {
+    return this.currentUser;
+  }
+
+  async logoutUser() {
+    await _supabase.auth.signOut();
+    this.currentUser = null;
+  }
+
+  async createTask(title, instructions, checklistText, createdBy) {
+    const checklist = checklistText.split('\n').filter(item => item.trim()).map(text => ({ text, checked: false }));
+
+    const { data: task, error: taskError } = await _supabase
+      .from('tasks')
+      .insert([{ title, instructions, checklist, created_by: createdBy, status: 'draft' }])
+      .select()
+      .single();
+
+    if (taskError) throw taskError;
+
+    // Create initial revision
+    await this.addRevision(task.id, instructions, createdBy);
+    return task;
+  }
+
+  async getTasks() {
+    const { data, error } = await _supabase
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) return [];
+    return data;
+  }
+
+  async getTask(taskId) {
+    const { data, error } = await _supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', taskId)
+      .single();
+    return data;
+  }
+
+  async renameProfile(userId, newName, oldName) {
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
+
+    try {
+      if (!oldName) oldName = userId; // Fallback
+
+      // 1. Propagate name change to all activity logs (Checklists, Revisions, Comments)
+      // Update checklists (Update BOTH ID and Name for non-UUID accounts)
+      const { data: existing } = await _supabase.from('student_checklists').select('*').eq('student_id', userId);
+      if (existing && existing.length > 0) {
+          const updateData = { student_name: newName };
+          if (!isUUID) updateData.student_id = newName; // Move the ID itself if it was the name
+          await _supabase.from('student_checklists').update(updateData).eq('student_id', userId);
+      } else if (!isUUID) {
+        await _supabase.from('student_checklists').insert([{
+          student_id: userId,
+          student_name: newName,
+          task_id: '00000000-0000-0000-0000-000000000000',
+          items: []
+        }]);
+      }
+
+      // Update activity logs
+      await _supabase.from('revisions').update({ author: newName }).eq('author', oldName);
+      await _supabase.from('comments').update({ author: newName }).eq('author', oldName);
+      await _supabase.from('tasks').update({ created_by: newName }).eq('created_by', oldName);
+
+      // 3. If renaming SELF, update auth metadata too
+      if (this.currentUser && this.currentUser.id === userId) {
+        await _supabase.auth.updateUser({
+          data: { full_name: newName }
+        });
+        this.currentUser.name = newName;
+      }
+    } catch (err) {
+      console.error("Rename failed:", err);
+      alert("Could not rename student. Check Supabase permissions.");
     }
+    return true;
   }
 
-  async function logout() {
-    await db.logoutUser();
-    location.reload();
+  async deleteTask(taskId) {
+    const { error } = await _supabase
+      .from('tasks')
+      .delete()
+      .eq('id', taskId);
+    if (error) throw error;
+    return true;
   }
 
-  async function loadDashboard() {
-    const taskGrid = document.getElementById('taskGrid');
-    const tasksList = document.getElementById('tasksList');
+  async renameTask(taskId, newTitle) {
+    const { error } = await _supabase
+      .from('tasks')
+      .update({ title: newTitle })
+      .eq('id', taskId);
+    if (error) throw error;
+    return true;
+  }
 
-    taskGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px;">Loading tasks...</div>';
-    tasksList.innerHTML = '';
+  async updateChecklist(taskId, checklist) {
+    await _supabase
+      .from('tasks')
+      .update({ checklist })
+      .eq('id', taskId);
+  }
 
-    const tasks = await db.getTasks();
-    taskGrid.innerHTML = '';
+  async addRevision(taskId, content, author) {
+    const { data, error } = await _supabase
+      .from('revisions')
+      .insert([{ task_id: taskId, content, author }])
+      .select()
+      .single();
+    return data;
+  }
 
-    for (const task of tasks) {
-      const revisions = await db.getTaskRevisions(task.id);
-      const html = `
+  async getTaskRevisions(taskId) {
+    const { data, error } = await _supabase
+      .from('revisions')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('timestamp', { ascending: true });
+    return data || [];
+  }
+
+  async addComment(taskId, author, text) {
+    const { data, error } = await _supabase
+      .from('comments')
+      .insert([{ task_id: taskId, author, text }])
+      .select()
+      .single();
+    return data;
+  }
+
+  async getStudentChecklist(taskId, studentId) {
+    const { data, error } = await _supabase
+      .from('student_checklists')
+      .select('*')
+      .eq('task_id', taskId)
+      .eq('student_id', studentId)
+      .single();
+    return data;
+  }
+
+  async updateStudentChecklist(taskId, studentId, studentName, items) {
+    const { data, error } = await _supabase
+      .from('student_checklists')
+      .upsert({
+        task_id: taskId,
+        student_id: studentId,
+        student_name: studentName,
+        items: items,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'task_id,student_id' });
+    
+    if (error) {
+      console.error("Checklist Save Error:", error);
+      throw error;
+    }
+    return data;
+  }
+
+  async getAllStudentChecklists() {
+    const { data, error } = await _supabase
+      .from('student_checklists')
+      .select('*');
+    if (error) console.error("Error fetching checklists:", error);
+    return data || [];
+  }
+
+  async getAllRevisions() {
+    const { data, error } = await _supabase
+      .from('revisions')
+      .select('*');
+    if (error) console.error("Error fetching all revisions:", error);
+    return data || [];
+  }
+
+  async getTaskComments(taskId) {
+    const { data, error } = await _supabase
+      .from('comments')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('timestamp', { ascending: true });
+    return data || [];
+  }
+}
+
+const db = new WritingDB();
+let currentTaskId = null;
+let editMode = false;
+
+// Initialize DB and Check Session
+window.addEventListener('load', async () => {
+  const user = await db.init();
+  if (user) {
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appContainer').classList.remove('hidden');
+    updateUserProfileUI(user);
+    loadDashboard();
+  }
+});
+
+function updateUserProfileUI(user) {
+  document.getElementById('userNameDisplay').textContent = user.name;
+  document.getElementById('userRoleDisplay').textContent = user.role;
+  document.getElementById('userAvatarIcon').textContent = user.name.charAt(0).toUpperCase();
+
+  // Hide teacher-only features from students
+  const newTaskBtn = document.getElementById('newTaskBtn');
+  const highlightBtn = document.getElementById('highlightBtn');
+
+  if (user.role === 'teacher') {
+    newTaskBtn.classList.remove('hidden');
+    highlightBtn.classList.remove('hidden');
+    document.getElementById('editBtn').classList.remove('hidden');
+    document.getElementById('teacherNav').classList.remove('hidden');
+  } else {
+    newTaskBtn.classList.add('hidden');
+    highlightBtn.classList.add('hidden');
+    document.getElementById('editBtn').classList.add('hidden');
+    document.getElementById('teacherNav').classList.add('hidden');
+  }
+}
+
+function showView(viewName) {
+  document.getElementById('dashboardView').classList.add('hidden');
+  document.getElementById('studentsView').classList.add('hidden');
+  document.getElementById('editorView').classList.add('hidden');
+
+  // Deactivate all sidebar items
+  document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+
+  if (viewName === 'dashboard') {
+    document.getElementById('dashboardView').classList.remove('hidden');
+    loadDashboard();
+  } else if (viewName === 'students') {
+    document.getElementById('studentsView').classList.remove('hidden');
+    loadStudentsView();
+  }
+}
+
+// Auth functions
+function switchTab(tab) {
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  const tabs = document.querySelectorAll('.auth-tab');
+
+  if (tab === 'login') {
+    loginForm.classList.remove('hidden');
+    signupForm.classList.add('hidden');
+    tabs[0].classList.add('active');
+    tabs[1].classList.remove('active');
+  } else {
+    loginForm.classList.add('hidden');
+    signupForm.classList.remove('hidden');
+    tabs[0].classList.remove('active');
+    tabs[1].classList.add('active');
+  }
+}
+
+function showMessage(elementId, message, isError = false) {
+  const element = document.getElementById(elementId);
+  element.innerHTML = `<div class="${isError ? 'error-message' : 'success-message'}">${message}</div>`;
+  setTimeout(() => {
+    element.innerHTML = '';
+  }, 4000);
+}
+
+async function handleLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+
+  if (!email || !password) {
+    showMessage('loginMessage', 'Please fill in all fields', true);
+    return;
+  }
+
+  const result = await db.loginUser(email, password);
+  if (result.success) {
+    const user = result.user;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appContainer').classList.remove('hidden');
+    updateUserProfileUI(user);
+    await loadDashboard();
+  } else {
+    showMessage('loginMessage', result.message, true);
+  }
+}
+
+async function handleSignup() {
+  const name = document.getElementById('signupName').value.trim();
+  const email = document.getElementById('signupEmail').value.trim();
+  const password = document.getElementById('signupPassword').value;
+  const role = document.getElementById('signupRole').value;
+
+  if (!name || !email || !password) {
+    showMessage('signupMessage', 'Please fill in all fields', true);
+    return;
+  }
+
+  if (password.length < 6) {
+    showMessage('signupMessage', 'Password must be at least 6 characters long', true);
+    return;
+  }
+
+  const result = await db.registerUser(email, password, name, role);
+  if (result.success) {
+    showMessage('signupMessage', 'Account created! Please log in.', false);
+    setTimeout(() => switchTab('login'), 2000);
+  } else {
+    // Handle the case where the user might already exist
+    let msg = result.message;
+    if (msg.includes('already registered')) {
+      msg = "Email already in use. Try logging in!";
+    }
+    showMessage('signupMessage', msg, true);
+  }
+}
+
+async function logout() {
+  await db.logoutUser();
+  location.reload();
+}
+
+async function loadDashboard() {
+  const taskGrid = document.getElementById('taskGrid');
+  const tasksList = document.getElementById('tasksList');
+
+  taskGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px;">Loading tasks...</div>';
+  tasksList.innerHTML = '';
+
+  const tasks = await db.getTasks();
+  taskGrid.innerHTML = '';
+
+  for (const task of tasks) {
+    const revisions = await db.getTaskRevisions(task.id);
+    const html = `
         <div class="task-card" onclick="openTask('${task.id}')">
           <h3>${task.title}</h3>
           <p>${task.instructions.substring(0, 60)}...</p>
@@ -461,201 +439,210 @@
           </div>
         </div>
       `;
-      taskGrid.innerHTML += html;
+    taskGrid.innerHTML += html;
 
-      const sidebarItem = document.createElement('div');
-      sidebarItem.className = 'sidebar-item';
-      sidebarItem.textContent = task.title.substring(0, 20) + '...';
-      sidebarItem.onclick = () => openTask(task.id);
-      tasksList.appendChild(sidebarItem);
-    }
+    const sidebarItem = document.createElement('div');
+    sidebarItem.className = 'sidebar-item';
+    sidebarItem.textContent = task.title.substring(0, 20) + '...';
+    sidebarItem.onclick = () => openTask(task.id);
+    tasksList.appendChild(sidebarItem);
   }
+}
 
-  async function openTask(taskId) {
-    currentTaskId = taskId;
-    const task = await db.getTask(taskId);
-    const revisions = await db.getTaskRevisions(taskId);
-    const currentRevision = revisions[revisions.length - 1];
+async function openTask(taskId) {
+  currentTaskId = taskId;
+  const task = await db.getTask(taskId);
+  const revisions = await db.getTaskRevisions(taskId);
+  const currentRevision = revisions[revisions.length - 1];
 
-    document.getElementById('dashboardView').classList.add('hidden');
-    document.getElementById('editorView').classList.remove('hidden');
+  document.getElementById('dashboardView').classList.add('hidden');
+  document.getElementById('editorView').classList.remove('hidden');
 
-    document.getElementById('taskTitle').textContent = task.title;
-    document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${currentRevision?.author || 'Unknown'}`;
-    
-    // Load content with highlights if enabled
-    await renderDraftContent(taskId);
+  document.getElementById('taskTitle').textContent = task.title;
+  document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${currentRevision?.author || 'Unknown'}`;
 
-    document.getElementById('editBtn').classList.remove('hidden');
+  // Load content with highlights if enabled
+  await renderDraftContent(taskId);
 
-    // Show/hide teacher-only sections based on role
-    const user = db.getCurrentUser();
-    const isTeacher = user.role === 'teacher';
-    
-    // Toggle focused mode for students
-    const editorContainer = document.querySelector('.editor-container');
-    editorContainer.classList.toggle('focused-mode', !isTeacher);
+  document.getElementById('editBtn').classList.remove('hidden');
 
-    document.getElementById('taskActionButtons').classList.toggle('hidden', !isTeacher);
-    // Students can see the feedback checklist now
-    document.getElementById('feedbackSection').classList.remove('hidden');
-    document.getElementById('saveFeedbackBtn').classList.toggle('hidden', !isTeacher);
-    document.getElementById('studentSelector').classList.toggle('hidden', !isTeacher);
-    
-    document.getElementById('commentsSection').classList.remove('hidden'); // Everyone can see comments section now
-    document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
+  // Show/hide teacher-only sections based on role
+  const user = db.getCurrentUser();
+  const isTeacher = user.role === 'teacher';
 
-    if (isTeacher) {
-      await populateStudentSelector(taskId);
-      loadChecklistItems([]); // Clear checklist until student is selected
-    } else {
-      await loadStudentChecklist(user.id, user.name);
-    }
+  // Toggle focused mode for students
+  const editorContainer = document.querySelector('.editor-container');
+  editorContainer.classList.toggle('focused-mode', !isTeacher);
 
-    // Auto-enable editing for everyone
-    const editor = document.getElementById('draftText');
-    editor.contentEditable = true;
-    editor.classList.add('editing');
-    
+  document.getElementById('taskActionButtons').classList.toggle('hidden', !isTeacher);
+  // Students can see the feedback checklist now
+  document.getElementById('feedbackSection').classList.remove('hidden');
+  document.getElementById('saveFeedbackBtn').classList.toggle('hidden', !isTeacher);
+  document.getElementById('studentSelector').classList.toggle('hidden', !isTeacher);
+
+  document.getElementById('commentsSection').classList.remove('hidden'); // Everyone can see comments section now
+  document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
+
+  if (isTeacher) {
+    await populateStudentSelector(taskId);
     loadChecklistItems([]); // Clear checklist until student is selected
-    await loadComments(taskId);
-    await loadRevisions(taskId);
+  } else {
+    await loadStudentChecklist(user.id, user.name);
   }
 
-  async function populateStudentSelector(taskId) {
-    const selector = document.getElementById('studentSelector');
-    selector.innerHTML = '<option value="">Select Student...</option>';
-    
-    // Show all enrolled students
-    const students = await db.getProfiles();
-    
-    students.forEach(student => {
-      const opt = document.createElement('option');
-      opt.value = student.id;
-      opt.textContent = student.name;
-      selector.appendChild(opt);
-    });
+  // Auto-enable editing for everyone
+  const editor = document.getElementById('draftText');
+  editor.contentEditable = true;
+  editor.classList.add('editing');
 
-    // Fallback: If no students in profiles, check revisions for people who contributed
-    if (students.length === 0) {
-        const revisions = await db.getTaskRevisions(taskId);
-        const authors = new Set();
-        revisions.forEach(rev => { if (rev.author) authors.add(rev.author); });
-        authors.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            selector.appendChild(opt);
-        });
+  loadChecklistItems([]); // Clear checklist until student is selected
+  await loadComments(taskId);
+  await loadRevisions(taskId);
+}
+
+async function populateStudentSelector(taskId) {
+  const selector = document.getElementById('studentSelector');
+  selector.innerHTML = '<option value="">Select Student...</option>';
+
+  // Discovery: Get anyone who has a checklist or a revision in the system
+  const [checklists, revisions] = await Promise.all([
+    db.getAllStudentChecklists(),
+    db.getTaskRevisions(taskId)
+  ]);
+
+  const studentMap = new Map();
+  // 1. Add people from known checklists
+  checklists.forEach(c => studentMap.set(c.student_id, c.student_name));
+
+  // 2. Add people from revisions on this task
+  revisions.forEach(r => {
+    if (r.author && !studentMap.has(r.author)) {
+      studentMap.set(r.author, r.author);
     }
+  });
+
+  // 3. Ensure current student is always in their own list
+  const user = db.getCurrentUser();
+  if (user && user.role === 'student' && !studentMap.has(user.id)) {
+    studentMap.set(user.id, user.name);
   }
 
-  async function loadStudentChecklist(studentIdOverride, studentNameOverride) {
-    const selector = document.getElementById('studentSelector');
-    const studentId = studentIdOverride || selector.value;
-    
-    if (!studentId) {
-      loadChecklistItems([]);
-      return;
-    }
+  const sorted = Array.from(studentMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  sorted.forEach(([id, name]) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = name;
+    selector.appendChild(opt);
+  });
+}
 
-    const task = await db.getTask(currentTaskId);
-    const savedProgress = await db.getStudentChecklist(currentTaskId, studentId);
-    
-    // Merge master checklist template with student's saved progress
-    const items = task.checklist.map((templateItem, idx) => {
-      const savedItem = savedProgress?.items?.[idx];
-      return {
-        text: typeof templateItem === 'object' ? templateItem.text : templateItem,
-        checked: savedItem ? savedItem.checked : false
-      };
-    });
+async function loadStudentChecklist(studentIdOverride, studentNameOverride) {
+  const selector = document.getElementById('studentSelector');
+  const studentId = studentIdOverride || selector.value;
 
-    loadChecklistItems(items);
+  if (!studentId) {
+    loadChecklistItems([]);
+    return;
   }
 
-  async function loadStudentsView() {
-    const listBody = document.getElementById('studentProgressBody');
-    listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px;">Deep-scanning database for any activity...</td></tr>';
-    
-    // Direct, independent fetches
-    const [profiles, allProgress, allRevisions] = await Promise.all([
-        db.getProfiles(),
-        db.getAllStudentChecklists(),
-        db.getAllRevisions()
-    ]);
-    
-    const studentMap = new Map(); // Keyed by ID (UUID or Name fallback)
-    const nameMap = new Map();    // Keyed by Name (for cross-referencing)
+  const task = await db.getTask(currentTaskId);
+  const savedProgress = await db.getStudentChecklist(currentTaskId, studentId);
 
-    // 1. Initialize with real Profiles (These are our primary identities)
-    profiles.forEach(p => {
-        const student = { 
-            id: p.id, 
-            name: p.name, 
-            email: p.email, 
-            lastActive: p.created_at,
-            completed: 0,
-            total: 0,
-            isProfile: true
-        };
-        studentMap.set(p.id, student);
-        nameMap.set(p.name, student);
-    });
-
-    // Helper to find or create student record consistently
-    const getStudent = (id, name, fallbackEmail, allowCreate = true) => {
-        if (studentMap.has(id)) return studentMap.get(id);
-        if (nameMap.has(name)) return nameMap.get(name);
-        if (nameMap.has(id)) return nameMap.get(id); 
-
-        if (!allowCreate) return null;
-
-        const newStudent = { id, name, email: fallbackEmail, lastActive: new Date(0).toISOString(), completed: 0, total: 0 };
-        studentMap.set(id, newStudent);
-        nameMap.set(name, newStudent);
-        return newStudent;
+  // Merge master checklist template with student's saved progress
+  const items = task.checklist.map((templateItem, idx) => {
+    const savedItem = savedProgress?.items?.[idx];
+    return {
+      text: typeof templateItem === 'object' ? templateItem.text : templateItem,
+      checked: savedItem ? savedItem.checked : false
     };
+  });
 
-    // 2. Merge Checklist Progress (Aggregates across all tasks)
-    allProgress.forEach(entry => {
-        const student = getStudent(entry.student_id, entry.student_name, 'Legacy Account');
-        const taskItems = entry.items || [];
-        student.completed += taskItems.filter(i => i.checked).length;
-        student.total += taskItems.length;
-        
-        if (new Date(entry.updated_at) > new Date(student.lastActive)) {
-            student.lastActive = entry.updated_at;
-        }
-    });
+  loadChecklistItems(items);
+}
 
-    // 3. Merge Revision activity
-    const currentUser = db.getCurrentUser();
-    allRevisions.forEach(rev => {
-        // Exclude teacher and only match existing registered students
-        if (currentUser && currentUser.role === 'teacher' && rev.author === currentUser.name) return;
+async function loadStudentsView() {
+  const listBody = document.getElementById('studentProgressBody');
+  listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px;">Deep-scanning database for any activity...</td></tr>';
 
-        const student = getStudent(rev.author, rev.author, null, false);
-        if (student && new Date(rev.timestamp) > new Date(student.lastActive)) {
-            student.lastActive = rev.timestamp;
-        }
-    });
+  // Discover activity from logs
+  const [allProgress, allRevisions] = await Promise.all([
+    db.getAllStudentChecklists(),
+    db.getAllRevisions()
+  ]);
 
-    listBody.innerHTML = '';
-    const sortedStudents = Array.from(studentMap.values()).sort((a,b) => new Date(b.lastActive) - new Date(a.lastActive));
-    
-    if (sortedStudents.length === 0) {
-        listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:#999;">No students found in the database.</td></tr>';
-        return;
+  const studentMap = new Map(); // Keyed by ID (UUID or Name fallback)
+  const nameMap = new Map();    // Keyed by Name (for cross-referencing)
+
+  // 1. Initialize with current user (if student) to ensure they are always visible
+    if (this.currentUser && this.currentUser.role === 'student') {
+        const student = { 
+            id: this.currentUser.id, 
+            name: this.currentUser.name, 
+            email: this.currentUser.email, 
+            lastActive: new Date().toISOString(),
+            completed: 0,
+            total: 0
+        };
+        studentMap.set(student.id, student);
+        nameMap.set(student.name.toLowerCase(), student);
     }
 
-    sortedStudents.forEach(student => {
-        const completed = student.completed || 0;
-        const total = student.total || 0;
-        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-        const status = total > 0 ? (percent === 100 ? '✅ Completed' : '✍️ Active') : '🆕 Not Evaluated';
-        
-        const row = `
+  // Helper to find or create student record consistently (Case-Insensitive)
+  const getStudent = (id, name, fallbackEmail, allowCreate = true) => {
+    const lowerName = name ? name.toLowerCase() : null;
+    
+    if (studentMap.has(id)) return studentMap.get(id);
+    if (lowerName && nameMap.has(lowerName)) return nameMap.get(lowerName);
+    if (id && nameMap.has(id.toString().toLowerCase())) return nameMap.get(id.toString().toLowerCase());
+
+    if (!allowCreate) return null;
+
+    const newStudent = { id, name: name || id, email: fallbackEmail, lastActive: new Date(0).toISOString(), completed: 0, total: 0 };
+    studentMap.set(id, newStudent);
+    if (lowerName) nameMap.set(lowerName, newStudent);
+    return newStudent;
+  };
+
+  // 2. Merge Checklist Progress (Aggregates across all tasks)
+  allProgress.forEach(entry => {
+    const student = getStudent(entry.student_id, entry.student_name, 'Class Member');
+    const taskItems = entry.items || [];
+    student.completed += taskItems.filter(i => i.checked).length;
+    student.total += taskItems.length;
+
+    if (new Date(entry.updated_at) > new Date(student.lastActive)) {
+      student.lastActive = entry.updated_at;
+    }
+  });
+
+  // 3. Merge Revision activity
+  const currentUser = db.getCurrentUser();
+  allRevisions.forEach(rev => {
+    // Exclude teacher and only match existing registered students
+    if (currentUser && currentUser.role === 'teacher' && rev.author === currentUser.name) return;
+
+    // Match existing or create temporary entry based on activity
+    const student = getStudent(rev.author, rev.author, 'Active Writer', true);
+    if (student && new Date(rev.timestamp) > new Date(student.lastActive)) {
+      student.lastActive = rev.timestamp;
+    }
+  });
+
+  listBody.innerHTML = '';
+  const sortedStudents = Array.from(studentMap.values()).sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+
+  if (sortedStudents.length === 0) {
+    listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:#999;">No students found in the database.</td></tr>';
+    return;
+  }
+
+  sortedStudents.forEach(student => {
+    const completed = student.completed || 0;
+    const total = student.total || 0;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const status = total > 0 ? (percent === 100 ? '✅ Completed' : '✍️ Active') : '🆕 Not Evaluated';
+
+    const row = `
             <tr>
               <td>
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -677,401 +664,405 @@
               <td><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
             </tr>
         `;
-        listBody.innerHTML += row;
+    listBody.innerHTML += row;
+  });
+}
+
+let highlightsEnabled = false;
+
+async function toggleHighlights() {
+  highlightsEnabled = !highlightsEnabled;
+  const btn = document.getElementById('highlightBtn');
+  btn.classList.toggle('active', highlightsEnabled);
+  btn.textContent = highlightsEnabled ? '🏷️ Hide Authors' : '🏷️ Show Authors';
+
+  document.getElementById('authorLegend').classList.toggle('hidden', !highlightsEnabled);
+  document.getElementById('draftText').classList.toggle('show-highlights', highlightsEnabled);
+
+  await renderDraftContent(currentTaskId);
+}
+
+function getAuthorColor(name) {
+  if (!name) return { bg: '#eee', border: '#ccc' };
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash) % 360;
+  return {
+    bg: `hsla(${h}, 70%, 90%, 0.8)`,
+    border: `hsla(${h}, 70%, 40%, 1)`
+  };
+}
+
+async function renderDraftContent(taskId) {
+  const revisions = await db.getTaskRevisions(taskId);
+  const editor = document.getElementById('draftText');
+  const legendItems = document.getElementById('authorLegendItems');
+
+  if (revisions.length === 0) return;
+
+  const currentRevision = revisions[revisions.length - 1];
+
+  if (!highlightsEnabled) {
+    editor.textContent = currentRevision.content;
+    return;
+  }
+
+  // Authorship detection logic
+  const dmp = new diff_match_patch();
+  let textWithAuthors = [{ text: revisions[0].content, author: revisions[0].author }];
+
+  for (let i = 1; i < revisions.length; i++) {
+    const rev = revisions[i];
+    const newContent = rev.content;
+    const oldContent = revisions[i - 1].content;
+
+    const diffs = dmp.diff_main(oldContent, newContent);
+    dmp.diff_cleanupSemantic(diffs);
+
+    let newAttribution = [];
+    let oldIdx = 0;
+
+    diffs.forEach(([type, text]) => {
+      if (type === 0) { // Unchanged
+        let remaining = text.length;
+        while (remaining > 0 && oldIdx < textWithAuthors.length) {
+          const segment = textWithAuthors[oldIdx];
+          if (segment.text.length <= remaining) {
+            newAttribution.push({ ...segment });
+            remaining -= segment.text.length;
+            oldIdx++;
+          } else {
+            newAttribution.push({ text: segment.text.substring(0, remaining), author: segment.author });
+            textWithAuthors[oldIdx].text = segment.text.substring(remaining);
+            remaining = 0;
+          }
+        }
+      } else if (type === 1) { // Added
+        newAttribution.push({ text, author: rev.author });
+      } else if (type === -1) { // Deleted
+        let remaining = text.length;
+        while (remaining > 0 && oldIdx < textWithAuthors.length) {
+          const segment = textWithAuthors[oldIdx];
+          if (segment.text.length <= remaining) {
+            remaining -= segment.text.length;
+            oldIdx++;
+          } else {
+            textWithAuthors[oldIdx].text = segment.text.substring(remaining);
+            remaining = 0;
+          }
+        }
+      }
     });
+    textWithAuthors = newAttribution;
   }
 
-  let highlightsEnabled = false;
+  // Render HTML
+  editor.innerHTML = '';
+  legendItems.innerHTML = '';
+  const authors = new Set();
 
-  async function toggleHighlights() {
-    highlightsEnabled = !highlightsEnabled;
-    const btn = document.getElementById('highlightBtn');
-    btn.classList.toggle('active', highlightsEnabled);
-    btn.textContent = highlightsEnabled ? '🏷️ Hide Authors' : '🏷️ Show Authors';
-    
-    document.getElementById('authorLegend').classList.toggle('hidden', !highlightsEnabled);
-    document.getElementById('draftText').classList.toggle('show-highlights', highlightsEnabled);
-    
-    await renderDraftContent(currentTaskId);
-  }
+  textWithAuthors.forEach(seg => {
+    if (!seg.text) return;
+    const span = document.createElement('span');
+    span.className = 'author-highlight';
+    const colors = getAuthorColor(seg.author);
+    span.style.setProperty('--author-bg', colors.bg);
+    span.style.setProperty('--author-color', colors.border);
+    span.textContent = seg.text;
+    span.title = `Written by ${seg.author}`;
+    editor.appendChild(span);
+    authors.add(seg.author);
+  });
 
-  function getAuthorColor(name) {
-    if (!name) return { bg: '#eee', border: '#ccc' };
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) {
-      hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const h = Math.abs(hash) % 360;
-    return {
-      bg: `hsla(${h}, 70%, 90%, 0.8)`,
-      border: `hsla(${h}, 70%, 40%, 1)`
-    };
-  }
-
-  async function renderDraftContent(taskId) {
-    const revisions = await db.getTaskRevisions(taskId);
-    const editor = document.getElementById('draftText');
-    const legendItems = document.getElementById('authorLegendItems');
-    
-    if (revisions.length === 0) return;
-    
-    const currentRevision = revisions[revisions.length - 1];
-
-    if (!highlightsEnabled) {
-      editor.textContent = currentRevision.content;
-      return;
-    }
-
-    // Authorship detection logic
-    const dmp = new diff_match_patch();
-    let textWithAuthors = [{ text: revisions[0].content, author: revisions[0].author }];
-    
-    for (let i = 1; i < revisions.length; i++) {
-        const rev = revisions[i];
-        const newContent = rev.content;
-        const oldContent = revisions[i-1].content;
-        
-        const diffs = dmp.diff_main(oldContent, newContent);
-        dmp.diff_cleanupSemantic(diffs);
-        
-        let newAttribution = [];
-        let oldIdx = 0;
-        
-        diffs.forEach(([type, text]) => {
-            if (type === 0) { // Unchanged
-                let remaining = text.length;
-                while (remaining > 0 && oldIdx < textWithAuthors.length) {
-                    const segment = textWithAuthors[oldIdx];
-                    if (segment.text.length <= remaining) {
-                        newAttribution.push({ ...segment });
-                        remaining -= segment.text.length;
-                        oldIdx++;
-                    } else {
-                        newAttribution.push({ text: segment.text.substring(0, remaining), author: segment.author });
-                        textWithAuthors[oldIdx].text = segment.text.substring(remaining);
-                        remaining = 0;
-                    }
-                }
-            } else if (type === 1) { // Added
-                newAttribution.push({ text, author: rev.author });
-            } else if (type === -1) { // Deleted
-                let remaining = text.length;
-                while (remaining > 0 && oldIdx < textWithAuthors.length) {
-                    const segment = textWithAuthors[oldIdx];
-                    if (segment.text.length <= remaining) {
-                        remaining -= segment.text.length;
-                        oldIdx++;
-                    } else {
-                        textWithAuthors[oldIdx].text = segment.text.substring(remaining);
-                        remaining = 0;
-                    }
-                }
-            }
-        });
-        textWithAuthors = newAttribution;
-    }
-
-    // Render HTML
-    editor.innerHTML = '';
-    legendItems.innerHTML = '';
-    const authors = new Set();
-    
-    textWithAuthors.forEach(seg => {
-        if (!seg.text) return;
-        const span = document.createElement('span');
-        span.className = 'author-highlight';
-        const colors = getAuthorColor(seg.author);
-        span.style.setProperty('--author-bg', colors.bg);
-        span.style.setProperty('--author-color', colors.border);
-        span.textContent = seg.text;
-        span.title = `Written by ${seg.author}`;
-        editor.appendChild(span);
-        authors.add(seg.author);
-    });
-    
-    authors.forEach(author => {
-        const colors = getAuthorColor(author);
-        const div = document.createElement('div');
-        div.className = 'legend-item';
-        div.innerHTML = `
+  authors.forEach(author => {
+    const colors = getAuthorColor(author);
+    const div = document.createElement('div');
+    div.className = 'legend-item';
+    div.innerHTML = `
             <div class="legend-swatch" style="background: ${colors.bg}; border: 1px solid ${colors.border}"></div>
             <span>${author}</span>
         `;
-        legendItems.appendChild(div);
-    });
+    legendItems.appendChild(div);
+  });
+}
+
+function goBack() {
+  editMode = false;
+  document.getElementById('editorView').classList.add('hidden');
+  document.getElementById('dashboardView').classList.remove('hidden');
+  document.getElementById('draftText').contentEditable = false;
+  document.getElementById('draftText').classList.remove('editing');
+  currentTaskId = null;
+  loadDashboard();
+}
+
+async function toggleEditMode() {
+  const user = db.getCurrentUser();
+
+  editMode = !editMode;
+
+  // Disable highlights when editing for cleaner experience
+  if (editMode && highlightsEnabled) {
+    await toggleHighlights();
   }
 
-  function goBack() {
-    editMode = false;
-    document.getElementById('editorView').classList.add('hidden');
-    document.getElementById('dashboardView').classList.remove('hidden');
-    document.getElementById('draftText').contentEditable = false;
-    document.getElementById('draftText').classList.remove('editing');
-    currentTaskId = null;
-    loadDashboard();
+  const editor = document.getElementById('draftText');
+  editor.contentEditable = editMode;
+  editor.classList.toggle('editing', editMode);
+  document.getElementById('editBtn').classList.toggle('active', editMode);
+
+  if (editMode) {
+    editor.focus();
   }
+}
 
-  async function toggleEditMode() {
-    const user = db.getCurrentUser();
+async function saveRevision() {
+  const content = document.getElementById('draftText').textContent;
+  const user = db.getCurrentUser();
 
-    editMode = !editMode;
-    
-    // Disable highlights when editing for cleaner experience
-    if (editMode && highlightsEnabled) {
-      await toggleHighlights();
-    }
+  await db.addRevision(currentTaskId, content, user.name);
 
-    const editor = document.getElementById('draftText');
-    editor.contentEditable = editMode;
-    editor.classList.toggle('editing', editMode);
-    document.getElementById('editBtn').classList.toggle('active', editMode);
+  editMode = false;
+  document.getElementById('draftText').contentEditable = false;
+  document.getElementById('draftText').classList.remove('editing');
+  document.getElementById('editBtn').classList.remove('active');
 
-    if (editMode) {
-      editor.focus();
-    }
-  }
+  const revisions = await db.getTaskRevisions(currentTaskId);
+  document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${user.name}`;
 
-  async function saveRevision() {
-    const content = document.getElementById('draftText').textContent;
-    const user = db.getCurrentUser();
+  await loadRevisions(currentTaskId);
+  await renderDraftContent(currentTaskId);
+  alert('Revision saved!');
+}
 
-    await db.addRevision(currentTaskId, content, user.name);
+function loadChecklistItems(checklist) {
+  const listEl = document.getElementById('checklistItems');
+  listEl.innerHTML = '';
+  const user = db.getCurrentUser();
 
-    editMode = false;
-    document.getElementById('draftText').contentEditable = false;
-    document.getElementById('draftText').classList.remove('editing');
-    document.getElementById('editBtn').classList.remove('active');
+  checklist.forEach((item, idx) => {
+    const li = document.createElement('li');
+    const text = typeof item === 'string' ? item : item.text;
+    const checked = typeof item === 'object' ? item.checked : (item.checked || false);
 
-    const revisions = await db.getTaskRevisions(currentTaskId);
-    document.getElementById('revisionLabel').textContent = `Revision ${revisions.length} by ${user.name}`;
+    const isTeacher = user.role === 'teacher';
+    const isDisabled = !isTeacher ? 'disabled' : '';
+    const checkedAttr = checked ? 'checked' : '';
 
-    await loadRevisions(currentTaskId);
-    await renderDraftContent(currentTaskId);
-    alert('Revision saved!');
-  }
-
-  function loadChecklistItems(checklist) {
-    const listEl = document.getElementById('checklistItems');
-    listEl.innerHTML = '';
-    const user = db.getCurrentUser();
-    
-    checklist.forEach((item, idx) => {
-      const li = document.createElement('li');
-      const text = typeof item === 'string' ? item : item.text;
-      const checked = typeof item === 'object' ? item.checked : (item.checked || false);
-      
-      const isTeacher = user.role === 'teacher';
-      const isDisabled = !isTeacher ? 'disabled' : '';
-      const checkedAttr = checked ? 'checked' : '';
-      
-      li.innerHTML = `
+    li.innerHTML = `
         <input type="checkbox" id="check-${idx}" ${isDisabled} ${checkedAttr} onchange="toggleChecklistItem(${idx}, this.checked)">
         <label for="check-${idx}" style="${!isTeacher ? 'cursor: default;' : ''}">${text}</label>
       `;
-      listEl.appendChild(li);
+    listEl.appendChild(li);
+  });
+
+  if (user.role !== 'teacher') {
+    const helper = document.createElement('div');
+    helper.className = 'helper-text';
+    helper.style.marginTop = '10px';
+    helper.style.fontSize = '11px';
+    helper.innerHTML = '🔒 Only teachers can check feedback items.';
+    listEl.appendChild(helper);
+  }
+}
+
+async function toggleChecklistItem(idx, checked) {
+  const studentId = document.getElementById('studentSelector').value;
+  const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
+
+  if (!studentId) return;
+
+  // Get current checklist UI state
+  const items = [];
+  document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
+    items.push({
+      text: cb.nextElementSibling.textContent,
+      checked: i === idx ? checked : cb.checked
     });
-    
-    if (user.role !== 'teacher') {
-      const helper = document.createElement('div');
-      helper.className = 'helper-text';
-      helper.style.marginTop = '10px';
-      helper.style.fontSize = '11px';
-      helper.innerHTML = '🔒 Only teachers can check feedback items.';
-      listEl.appendChild(helper);
-    }
+  });
+
+  await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
+}
+
+async function saveCurrentChecklist() {
+  const studentId = document.getElementById('studentSelector').value;
+  const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
+
+  if (!studentId) {
+    alert('Please select a student first');
+    return;
   }
 
-  async function toggleChecklistItem(idx, checked) {
-    const studentId = document.getElementById('studentSelector').value;
-    const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
-    
-    if (!studentId) return;
-
-    // Get current checklist UI state
-    const items = [];
-    document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
-        items.push({
-            text: cb.nextElementSibling.textContent,
-            checked: i === idx ? checked : cb.checked
-        });
+  const items = [];
+  document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
+    items.push({
+      text: cb.nextElementSibling.textContent,
+      checked: cb.checked
     });
+  });
 
+  try {
     await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
+    alert('✅ Feedback checklist saved and submitted successfully!');
+  } catch (err) {
+    console.error(err);
+    alert('❌ Failed to save checklist. Please try again.');
   }
+}
 
-  async function saveCurrentChecklist() {
-    const studentId = document.getElementById('studentSelector').value;
-    const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
-    
-    if (!studentId) {
-      alert('Please select a student first');
-      return;
-    }
+async function loadComments(taskId) {
+  const commentsList = document.getElementById('commentsList');
+  const taskComments = await db.getTaskComments(taskId);
+  const user = db.getCurrentUser();
+  commentsList.innerHTML = '';
 
-    const items = [];
-    document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
-        items.push({
-            text: cb.nextElementSibling.textContent,
-            checked: cb.checked
-        });
-    });
-
-    try {
-      await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
-      alert('✅ Feedback checklist saved and submitted successfully!');
-    } catch (err) {
-      console.error(err);
-      alert('❌ Failed to save checklist. Please try again.');
-    }
-  }
-
-  async function loadComments(taskId) {
-    const commentsList = document.getElementById('commentsList');
-    const taskComments = await db.getTaskComments(taskId);
-    const user = db.getCurrentUser();
-    commentsList.innerHTML = '';
-
-    taskComments.forEach(comment => {
-      // Everyone can see all comments now
-      const div = document.createElement('div');
-      div.className = 'comment';
-      div.innerHTML = `
+  taskComments.forEach(comment => {
+    // Everyone can see all comments now
+    const div = document.createElement('div');
+    div.className = 'comment';
+    div.innerHTML = `
         <div class="comment-author">${comment.author} ${comment.author === user.name ? '(You)' : ''}</div>
         <div class="comment-time">${new Date(comment.timestamp).toLocaleString()}</div>
         <div class="comment-text">${comment.text}</div>
       `;
-      commentsList.appendChild(div);
-    });
+    commentsList.appendChild(div);
+  });
 
-    if (commentsList.innerHTML === '') {
-        commentsList.innerHTML = '<div style="text-align:center; color:#999; padding:20px; font-size:13px;">No comments yet. Be the first to start the conversation!</div>';
-    }
+  if (commentsList.innerHTML === '') {
+    commentsList.innerHTML = '<div style="text-align:center; color:#999; padding:20px; font-size:13px;">No comments yet. Be the first to start the conversation!</div>';
+  }
+}
+
+async function addComment() {
+  const text = document.getElementById('newCommentText').value.trim();
+  if (!text) {
+    alert('Please write a comment');
+    return;
   }
 
-  async function addComment() {
-    const text = document.getElementById('newCommentText').value.trim();
-    if (!text) {
-      alert('Please write a comment');
-      return;
-    }
+  const user = db.getCurrentUser();
+  await db.addComment(currentTaskId, user.name, text);
+  document.getElementById('newCommentText').value = '';
+  await loadComments(currentTaskId);
+}
 
-    const user = db.getCurrentUser();
-    await db.addComment(currentTaskId, user.name, text);
-    document.getElementById('newCommentText').value = '';
-    await loadComments(currentTaskId);
-  }
+async function loadRevisions(taskId) {
+  const revisionsList = document.getElementById('revisionsList');
+  const revisions = await db.getTaskRevisions(taskId);
+  revisionsList.innerHTML = '';
 
-  async function loadRevisions(taskId) {
-    const revisionsList = document.getElementById('revisionsList');
-    const revisions = await db.getTaskRevisions(taskId);
-    revisionsList.innerHTML = '';
-
-    revisions.forEach((rev, idx) => {
-      const div = document.createElement('div');
-      div.className = 'revision-item';
-      if (idx === revisions.length - 1) div.classList.add('active');
-      div.innerHTML = `
+  revisions.forEach((rev, idx) => {
+    const div = document.createElement('div');
+    div.className = 'revision-item';
+    if (idx === revisions.length - 1) div.classList.add('active');
+    div.innerHTML = `
         <div class="revision-author">Rev ${idx + 1}</div>
         <div class="revision-time">${new Date(rev.timestamp).toLocaleString()}</div>
         <div style="color: #666; margin-top: 4px; font-size: 11px;">by ${rev.author}</div>
       `;
-      div.onclick = () => {
-        document.getElementById('draftText').textContent = rev.content;
-        document.getElementById('draftText').contentEditable = false;
-        editMode = false;
-        document.getElementById('editBtn').classList.remove('active');
-        document.querySelectorAll('.revision-item').forEach(item => item.classList.remove('active'));
-        div.classList.add('active');
+    div.onclick = () => {
+      document.getElementById('draftText').textContent = rev.content;
+      document.getElementById('draftText').contentEditable = false;
+      editMode = false;
+      document.getElementById('editBtn').classList.remove('active');
+      document.querySelectorAll('.revision-item').forEach(item => item.classList.remove('active'));
+      div.classList.add('active');
 
-        // Disable highlights when viewing history
-        if (highlightsEnabled) {
-          highlightsEnabled = false;
-          const btn = document.getElementById('highlightBtn');
-          btn.classList.remove('active');
-          btn.textContent = '🏷️ Show Authors';
-          document.getElementById('authorLegend').classList.add('hidden');
-          document.getElementById('draftText').classList.remove('show-highlights');
-        }
-      };
-      revisionsList.appendChild(div);
-    });
+      // Disable highlights when viewing history
+      if (highlightsEnabled) {
+        highlightsEnabled = false;
+        const btn = document.getElementById('highlightBtn');
+        btn.classList.remove('active');
+        btn.textContent = '🏷️ Show Authors';
+        document.getElementById('authorLegend').classList.add('hidden');
+        document.getElementById('draftText').classList.remove('show-highlights');
+      }
+    };
+    revisionsList.appendChild(div);
+  });
+}
+
+function openCreateTaskModal() {
+  document.getElementById('createTaskModal').classList.add('active');
+}
+
+function closeCreateTaskModal() {
+  document.getElementById('createTaskModal').classList.remove('active');
+  document.getElementById('newTaskTitle').value = '';
+  document.getElementById('newTaskInstructions').value = '';
+  document.getElementById('newTaskChecklist').value = '';
+}
+
+async function createTask() {
+  const title = document.getElementById('newTaskTitle').value.trim();
+  const instructions = document.getElementById('newTaskInstructions').value.trim();
+  const checklist = document.getElementById('newTaskChecklist').value.trim();
+
+  if (!title || !instructions || !checklist) {
+    alert('Please fill in all fields');
+    return;
   }
 
-  function openCreateTaskModal() {
-    document.getElementById('createTaskModal').classList.add('active');
-  }
+  const user = db.getCurrentUser();
+  await db.createTask(title, instructions, checklist, user.name);
 
-  function closeCreateTaskModal() {
-    document.getElementById('createTaskModal').classList.remove('active');
-    document.getElementById('newTaskTitle').value = '';
-    document.getElementById('newTaskInstructions').value = '';
-    document.getElementById('newTaskChecklist').value = '';
-  }
+  closeCreateTaskModal();
+  await loadDashboard();
+  alert('Task created!');
+}
 
-  async function createTask() {
-    const title = document.getElementById('newTaskTitle').value.trim();
-    const instructions = document.getElementById('newTaskInstructions').value.trim();
-    const checklist = document.getElementById('newTaskChecklist').value.trim();
-
-    if (!title || !instructions || !checklist) {
-      alert('Please fill in all fields');
-      return;
+async function promptRenameStudent(studentId, currentName) {
+  const newName = prompt('Enter new display name for student:', currentName);
+  if (newName && newName.trim() && newName !== currentName) {
+    await db.renameProfile(studentId, newName.trim(), currentName);
+    if (currentTaskId) {
+      await populateStudentSelector(currentTaskId);
+      document.getElementById('studentSelector').value = studentId;
+      // Immediate refresh of editor labels and legends
+      await renderDraftContent(currentTaskId);
+      await loadComments(currentTaskId);
+      await loadRevisions(currentTaskId);
     }
-
-    const user = db.getCurrentUser();
-    await db.createTask(title, instructions, checklist, user.name);
-
-    closeCreateTaskModal();
-    await loadDashboard();
-    alert('Task created!');
+    await loadStudentsView(); // Refresh the list if visible
   }
+}
 
-  async function promptRenameStudent(studentId, currentName) {
-    const newName = prompt('Enter new display name for student:', currentName);
-    if (newName && newName.trim() && newName !== currentName) {
-        await db.renameProfile(studentId, newName.trim());
-        if (currentTaskId) {
-            await populateStudentSelector(currentTaskId);
-            document.getElementById('studentSelector').value = studentId;
-        }
-        await loadStudentsView(); // Refresh the list if visible
-    }
+async function promptRenameSelf() {
+  const user = db.getCurrentUser();
+  const newName = prompt('Enter your new display name:', user.name);
+  if (newName && newName.trim() && newName !== user.name) {
+    await db.renameProfile(user.id, newName.trim(), user.name);
+    alert('Name updated! Page will reload to apply changes.');
+    location.reload();
   }
+}
 
-  async function promptRenameSelf() {
-    const user = db.getCurrentUser();
-    const newName = prompt('Enter your new display name:', user.name);
-    if (newName && newName.trim() && newName !== user.name) {
-        await db.renameProfile(user.id, newName.trim());
-        alert('Name updated! Page will reload to apply changes.');
-        location.reload(); 
-    }
+async function renameSelectedStudent() {
+  const selector = document.getElementById('studentSelector');
+  const studentId = selector.value;
+  if (!studentId) {
+    alert('Please select a student from the list first');
+    return;
   }
+  const currentName = selector.options[selector.selectedIndex].text;
+  await promptRenameStudent(studentId, currentName);
+}
 
-  async function renameSelectedStudent() {
-     const selector = document.getElementById('studentSelector');
-     const studentId = selector.value;
-     if (!studentId) {
-         alert('Please select a student from the list first');
-         return;
-     }
-     const currentName = selector.options[selector.selectedIndex].text;
-     await promptRenameStudent(studentId, currentName);
+async function promptRename() {
+  const task = await db.getTask(currentTaskId);
+  const newTitle = prompt('Enter new task title:', task.title);
+  if (newTitle && newTitle.trim() && newTitle !== task.title) {
+    await db.renameTask(currentTaskId, newTitle.trim());
+    document.getElementById('taskTitle').textContent = newTitle.trim();
+    await loadDashboard(); // Update sidebar/dashboard titles
   }
+}
 
-  async function promptRename() {
-    const task = await db.getTask(currentTaskId);
-    const newTitle = prompt('Enter new task title:', task.title);
-    if (newTitle && newTitle.trim() && newTitle !== task.title) {
-        await db.renameTask(currentTaskId, newTitle.trim());
-        document.getElementById('taskTitle').textContent = newTitle.trim();
-        await loadDashboard(); // Update sidebar/dashboard titles
-    }
+async function confirmDelete() {
+  if (confirm('Are you sure you want to PERMANENTLY delete this task? This cannot be undone.')) {
+    await db.deleteTask(currentTaskId);
+    goBack(); // Return to dashboard
   }
-
-  async function confirmDelete() {
-    if (confirm('Are you sure you want to PERMANENTLY delete this task? This cannot be undone.')) {
-        await db.deleteTask(currentTaskId);
-        goBack(); // Return to dashboard
-    }
-  }
+}
