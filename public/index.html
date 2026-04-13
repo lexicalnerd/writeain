@@ -348,6 +348,25 @@
       color: #999;
     }
 
+    .btn-icon {
+      padding: 6px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background: white;
+      cursor: pointer;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .btn-icon:hover {
+      background: #f9f9f9;
+      transform: scale(1.1);
+      border-color: #667eea;
+    }
+
     .sidebar-item {
       padding: 12px 16px;
       margin-bottom: 8px;
@@ -842,6 +861,43 @@
       height: 12px;
       border-radius: 3px;
     }
+
+    /* Progress Table */
+    .progress-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    .progress-table th {
+      text-align: left;
+      padding: 16px;
+      color: #999;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    .progress-table td {
+      padding: 20px 16px;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 14px;
+    }
+
+    .progress-bar-bg {
+      width: 150px;
+      height: 8px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.5s ease;
+    }
   </style>
 </head>
 
@@ -919,6 +975,13 @@
             New Task</button>
 
           <div class="sidebar-divider"></div>
+          
+          <div id="teacherNav" class="hidden">
+            <div class="sidebar-item" onclick="showView('dashboard')">📚 My Tasks</div>
+            <div class="sidebar-item" onclick="showView('students')">👥 All Students</div>
+          </div>
+
+          <div class="sidebar-divider"></div>
 
           <div class="sidebar-item" onclick="logout()">🚪 Logout</div>
         </div>
@@ -930,11 +993,40 @@
             <div class="task-grid" id="taskGrid"></div>
           </div>
 
+          <div id="studentsView" class="hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <div>
+                    <h2>Student Progress Overview</h2>
+                    <p class="content-meta">Track individual checklist completion across all tasks</p>
+                </div>
+            </div>
+            
+            <div class="progress-container">
+                <table class="progress-table">
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Last Active</th>
+                      <th>Checklist Progress</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="studentProgressBody"></tbody>
+                </table>
+            </div>
+          </div>
+
           <div id="editorView" class="hidden">
             <div class="editor-header">
-              <div>
-                <h2 id="taskTitle"></h2>
-                <p class="content-meta"><span id="revisionLabel"></span></p>
+              <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <div>
+                  <h2 id="taskTitle" style="display: inline-block;"></h2>
+                  <div id="taskActionButtons" class="hidden" style="display: inline-flex; gap: 8px; margin-left: 12px;">
+                    <button class="btn-icon" onclick="promptRename()" title="Rename Task">✏️</button>
+                    <button class="btn-icon" onclick="confirmDelete()" title="Delete Task" style="background: #fff0f0; border-color: #ffcdd2;">🗑️</button>
+                  </div>
+                  <p class="content-meta"><span id="revisionLabel"></span></p>
+                </div>
               </div>
               <div class="toolbar">
                 <button class="toolbar-btn" id="editBtn" onclick="toggleEditMode()">✍️ Edit Draft</button>

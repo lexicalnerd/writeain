@@ -29,6 +29,17 @@
                         name: session.user.user_metadata.full_name,
                         role: session.user.user_metadata.role
                     };
+
+                    // SELF-HEALING: Ensure a profile exists for this user
+                    const { data: profile } = await _supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                    if (!profile) {
+                         await _supabase.from('profiles').insert([{
+                            id: session.user.id,
+                            email: this.currentUser.email,
+                            name: this.currentUser.name,
+                            role: this.currentUser.role
+                         }]);
+                    }
                 }
                 return this.currentUser;
             } catch (err) {
@@ -67,7 +78,25 @@
                 }
             });
             if (error) return { success: false, message: error.message };
+            
+            // NEW: Create a public profile entry so the teacher can see the student in the list
+            await _supabase.from('profiles').insert([{ 
+                id: data.user.id, 
+                email: email, 
+                name: name, 
+                role: role 
+            }]);
+
             return { success: true };
+        }
+
+        async getProfiles() {
+            const { data, error } = await _supabase
+                .from('profiles')
+                .select('*')
+                .eq('role', 'student')
+                .order('name', { ascending: true });
+            return data || [];
         }
 
         async loginUser(email, password) {
@@ -127,6 +156,58 @@
             return data;
         }
 
+        async renameProfile(userId, newName) {
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId);
+            
+            try {
+                if (isUUID) {
+                    // 1. Try to update or create profile (Requires UUID)
+                    const { data: profile } = await _supabase.from('profiles').select('*').eq('id', userId).single();
+                    if (profile) {
+                        await _supabase.from('profiles').update({ name: newName }).eq('id', userId);
+                    } else {
+                        await _supabase.from('profiles').insert([{ id: userId, name: newName, role: 'student' }]);
+                    }
+                }
+                
+                // 2. Always update checklist records (Works with both UUID and Name-based IDs)
+                const { data: existing } = await _supabase.from('student_checklists').select('*').eq('student_id', userId).limit(1);
+                if (existing && existing.length > 0) {
+                    await _supabase.from('student_checklists').update({ student_name: newName }).eq('student_id', userId);
+                } else if (!isUUID) {
+                    // Create legacy marker for name-based IDs
+                    await _supabase.from('student_checklists').insert([{ 
+                        student_id: userId, 
+                        student_name: newName, 
+                        task_id: '00000000-0000-0000-0000-000000000000',
+                        items: [] 
+                    }]);
+                }
+            } catch (err) {
+                console.error("Rename failed:", err);
+                alert("Could not rename student. Check Supabase permissions.");
+            }
+            return true;
+        }
+
+        async deleteTask(taskId) {
+            const { error } = await _supabase
+                .from('tasks')
+                .delete()
+                .eq('id', taskId);
+            if (error) throw error;
+            return true;
+        }
+
+        async renameTask(taskId, newTitle) {
+            const { error } = await _supabase
+                .from('tasks')
+                .update({ title: newTitle })
+                .eq('id', taskId);
+            if (error) throw error;
+            return true;
+        }
+
         async updateChecklist(taskId, checklist) {
             await _supabase
                 .from('tasks')
@@ -184,6 +265,22 @@
             return data;
         }
 
+        async getAllStudentChecklists() {
+            const { data, error } = await _supabase
+                .from('student_checklists')
+                .select('*');
+            if (error) console.error("Error fetching checklists:", error);
+            return data || [];
+        }
+
+        async getAllRevisions() {
+            const { data, error } = await _supabase
+                .from('revisions')
+                .select('*');
+            if (error) console.error("Error fetching all revisions:", error);
+            return data || [];
+        }
+
         async getTaskComments(taskId) {
             const { data, error } = await _supabase
                 .from('comments')
@@ -222,10 +319,29 @@
       newTaskBtn.classList.remove('hidden');
       highlightBtn.classList.remove('hidden');
       document.getElementById('editBtn').classList.remove('hidden');
+      document.getElementById('teacherNav').classList.remove('hidden');
     } else {
       newTaskBtn.classList.add('hidden');
       highlightBtn.classList.add('hidden');
       document.getElementById('editBtn').classList.add('hidden');
+      document.getElementById('teacherNav').classList.add('hidden');
+    }
+  }
+
+  function showView(viewName) {
+    document.getElementById('dashboardView').classList.add('hidden');
+    document.getElementById('studentsView').classList.add('hidden');
+    document.getElementById('editorView').classList.add('hidden');
+    
+    // Deactivate all sidebar items
+    document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+
+    if (viewName === 'dashboard') {
+      document.getElementById('dashboardView').classList.remove('hidden');
+      loadDashboard();
+    } else if (viewName === 'students') {
+      document.getElementById('studentsView').classList.remove('hidden');
+      loadStudentsView();
     }
   }
 
@@ -369,6 +485,7 @@
     const editorContainer = document.querySelector('.editor-container');
     editorContainer.classList.toggle('focused-mode', !isTeacher);
 
+    document.getElementById('taskActionButtons').classList.toggle('hidden', !isTeacher);
     document.getElementById('feedbackSection').classList.toggle('hidden', !isTeacher);
     document.getElementById('commentsSection').classList.remove('hidden'); // Everyone can see comments section now
     document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
@@ -429,6 +546,98 @@
     });
 
     loadChecklistItems(items);
+  }
+
+  async function loadStudentsView() {
+    const listBody = document.getElementById('studentProgressBody');
+    listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px;">Deep-scanning database for any activity...</td></tr>';
+    
+    // Direct, independent fetches - even if tasks are empty, these will find people in the logs
+    const [profiles, allProgress, allRevisions] = await Promise.all([
+        db.getProfiles(),
+        db.getAllStudentChecklists(),
+        db.getAllRevisions()
+    ]);
+    
+    // Unified Student Map
+    const studentMap = new Map();
+
+    // 1. Add people found in checklists (These have priority names set by teacher)
+    allProgress.forEach(entry => {
+        studentMap.set(entry.student_id, { 
+            id: entry.student_id, 
+            name: entry.student_name, // This is the 'Renamed' name
+            email: 'Legacy Account', 
+            lastActive: entry.updated_at,
+            completed: 0,
+            total: 0
+        });
+        const stats = studentMap.get(entry.student_id);
+        const taskItems = entry.items || [];
+        stats.completed = taskItems.filter(i => i.checked).length;
+        stats.total = taskItems.length;
+    });
+
+    // 2. Add people from profiles (Real accounts) - Overwrites legacy if ID matches
+    profiles.forEach(p => {
+        const stats = studentMap.get(p.id) || { completed: 0, total: 0 };
+        studentMap.set(p.id, { 
+            id: p.id, 
+            name: p.name, 
+            email: p.email, 
+            lastActive: p.created_at,
+            completed: stats.completed,
+            total: stats.total
+        });
+    });
+
+    // 3. Add remains from revisions (Final fallback)
+    allRevisions.forEach(rev => {
+        if (!studentMap.has(rev.author)) {
+             studentMap.set(rev.author, { id: rev.author, name: rev.author, email: 'Active Writer', lastActive: rev.timestamp, completed: 0, total: 0 });
+        }
+        const stats = studentMap.get(rev.author);
+        if (new Date(rev.timestamp) > new Date(stats.lastActive)) stats.lastActive = rev.timestamp;
+    });
+
+    listBody.innerHTML = '';
+    const sortedStudents = Array.from(studentMap.values()).sort((a,b) => new Date(b.lastActive) - new Date(a.lastActive));
+    
+    if (sortedStudents.length === 0) {
+        listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px; color:#999;">No students found in the database.</td></tr>';
+        return;
+    }
+
+    sortedStudents.forEach(student => {
+        const completed = student.completed || 0;
+        const total = student.total || 0;
+        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const status = total > 0 ? (percent === 100 ? '✅ Completed' : '✍️ Active') : '🆕 Not Evaluated';
+        
+        const row = `
+            <tr>
+              <td>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="font-weight:600;">${student.name}</div>
+                    <button class="btn-icon" style="padding:2px; font-size:10px;" onclick="promptRenameStudent('${student.id}', '${student.name}')" title="Rename Student">✏️</button>
+                </div>
+                <div style="font-size:11px; color:#999;">${student.email || 'System Account'}</div>
+              </td>
+              <td style="color:#666;">${new Date(student.lastActive).toLocaleDateString()}</td>
+              <td>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" style="width: ${percent}%"></div>
+                  </div>
+                  <span style="font-size:12px; font-weight:600; color:#667eea;">${percent}%</span>
+                </div>
+                <div style="font-size:10px; color:#999; margin-top:4px;">${total > 0 ? `${completed} of ${total} total items` : 'No feedback given yet'}</div>
+              </td>
+              <td><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
+            </tr>
+        `;
+        listBody.innerHTML += row;
+    });
   }
 
   let highlightsEnabled = false;
@@ -750,4 +959,29 @@
     closeCreateTaskModal();
     await loadDashboard();
     alert('Task created!');
+  }
+
+  async function promptRenameStudent(studentId, currentName) {
+    const newName = prompt('Enter new display name for student:', currentName);
+    if (newName && newName.trim() && newName !== currentName) {
+        await db.renameProfile(studentId, newName.trim());
+        await loadStudentsView(); // Refresh the list
+    }
+  }
+
+  async function promptRename() {
+    const task = await db.getTask(currentTaskId);
+    const newTitle = prompt('Enter new task title:', task.title);
+    if (newTitle && newTitle.trim() && newTitle !== task.title) {
+        await db.renameTask(currentTaskId, newTitle.trim());
+        document.getElementById('taskTitle').textContent = newTitle.trim();
+        await loadDashboard(); // Update sidebar/dashboard titles
+    }
+  }
+
+  async function confirmDelete() {
+    if (confirm('Are you sure you want to PERMANENTLY delete this task? This cannot be undone.')) {
+        await db.deleteTask(currentTaskId);
+        goBack(); // Return to dashboard
+    }
   }
