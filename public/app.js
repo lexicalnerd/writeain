@@ -616,15 +616,15 @@
         
         const row = `
             <tr>
-              <td>
+              <td data-label="Student">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <div style="font-weight:600;">${student.name}</div>
                     <button class="btn-icon" style="padding:2px; font-size:10px;" onclick="promptRenameStudent('${student.id}', '${student.name}')" title="Rename Student">✏️</button>
                 </div>
                 <div style="font-size:11px; color:#999;">${student.email || 'System Account'}</div>
               </td>
-              <td style="color:#666;">${new Date(student.lastActive).toLocaleDateString()}</td>
-              <td>
+              <td data-label="Last Active" style="color:#666;">${new Date(student.lastActive).toLocaleDateString()}</td>
+              <td data-label="Checklist Progress">
                 <div style="display:flex; align-items:center; gap:12px;">
                   <div class="progress-bar-bg">
                     <div class="progress-bar-fill" style="width: ${percent}%"></div>
@@ -633,7 +633,7 @@
                 </div>
                 <div style="font-size:10px; color:#999; margin-top:4px;">${total > 0 ? `${completed} of ${total} total items` : 'No feedback given yet'}</div>
               </td>
-              <td><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
+              <td data-label="Status"><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
             </tr>
         `;
         listBody.innerHTML += row;

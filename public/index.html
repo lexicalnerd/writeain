@@ -504,46 +504,131 @@
       gap: 28px;
     }
 
-    @media (max-width: 1024px) {
-      .editor-container {
-        grid-template-columns: 1fr;
-      }
+    /* ==========================================================================
+       MOBILE OVERHAUL (Native App Experience)
+       ========================================================================== */
+    @media (max-width: 992px) {
       .container {
-        grid-template-columns: 1fr;
+        display: block;
+        padding: 0;
+        margin: 0;
       }
-      .sidebar {
-        position: static;
-        width: 100%;
-        height: auto;
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-    }
 
-    @media (max-width: 768px) {
-      .container {
+      /* Transform Sidebar into Top Bar & Bottom Nav */
+      .sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 70px;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: center;
+        padding: 0 10px;
+        border-right: none;
+        border-top: 1px solid #eee;
+        z-index: 1000;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.05);
+      }
+
+      .sidebar .logo { display: none; }
+      .sidebar-divider { display: none; }
+      .sidebar-item {
+        margin: 0;
         padding: 10px;
+        flex: 1;
+        text-align: center;
+        font-size: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
       }
+      .sidebar-item:hover { transform: none; }
+
+      /* Content Area Adjustments */
       .content {
-        padding: 20px;
+        margin-bottom: 80px; /* Space for bottom nav */
+        border-radius: 0;
+        padding: 20px 15px;
+        box-shadow: none;
       }
+
+      .editor-container {
+        display: block;
+      }
+
+      /* Dashboard Grid */
+      .task-grid {
+        grid-template-columns: 1fr;
+      }
+
+      /* Editor Specifics */
       .editor-header {
         flex-direction: column;
-        gap: 16px;
+        align-items: flex-start;
       }
+
       .toolbar {
-        justify-content: center;
+        width: 100%;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 10px;
+        margin-top: 15px;
+        gap: 8px;
+        display: flex;
+        -webkit-overflow-scrolling: touch;
       }
+      .toolbar::-webkit-scrollbar { display: none; }
+
       .draft-text {
         padding: 20px;
-        min-height: 300px;
+        font-size: 15px;
+        min-height: 350px;
+        border-radius: 12px;
       }
-      .progress-container {
-        overflow-x: auto;
+
+      /* Stacked Sidebar Sections with better spacing */
+      .sidebar-section {
+        margin-top: 40px;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 16px;
       }
-      .progress-table {
-        min-width: 600px;
+
+      /* Progress Table -> Card View fallback */
+      .progress-table thead { display: none; }
+      .progress-table, .progress-table tbody, .progress-table tr, .progress-table td {
+        display: block;
+        width: 100%;
       }
+      .progress-table tr {
+        background: white;
+        margin-bottom: 15px;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        border: 1px solid #eee;
+      }
+      .progress-table td {
+        border: none;
+        padding: 8px 0;
+      }
+      .progress-table td::before {
+        content: attr(data-label);
+        font-weight: 700;
+        font-size: 11px;
+        color: #999;
+        display: block;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      
+      .progress-bar-bg { width: 100%; }
     }
 
     .editor-container.focused-mode {
