@@ -170,12 +170,19 @@
                     }
                 }
                 
-                // 2. Always update checklist records (Works with both UUID and Name-based IDs)
+                // 2. Propagate name change to all other logs (Checklists, Revisions, Comments)
+                // We need to find the old name first if we only have a UUID
+                let oldName = userId;
+                if (isUUID) {
+                    const { data: p } = await _supabase.from('profiles').select('name').eq('id', userId).single();
+                    if (p) oldName = p.name;
+                }
+
+                // Update checklists
                 const { data: existing } = await _supabase.from('student_checklists').select('*').eq('student_id', userId).limit(1);
                 if (existing && existing.length > 0) {
                     await _supabase.from('student_checklists').update({ student_name: newName }).eq('student_id', userId);
                 } else if (!isUUID) {
-                    // Create legacy marker for name-based IDs
                     await _supabase.from('student_checklists').insert([{ 
                         student_id: userId, 
                         student_name: newName, 
@@ -183,6 +190,10 @@
                         items: [] 
                     }]);
                 }
+
+                // Update activity logs
+                await _supabase.from('revisions').update({ author: newName }).eq('author', oldName);
+                await _supabase.from('comments').update({ author: newName }).eq('author', oldName);
             } catch (err) {
                 console.error("Rename failed:", err);
                 alert("Could not rename student. Check Supabase permissions.");
@@ -486,12 +497,19 @@
     editorContainer.classList.toggle('focused-mode', !isTeacher);
 
     document.getElementById('taskActionButtons').classList.toggle('hidden', !isTeacher);
-    document.getElementById('feedbackSection').classList.toggle('hidden', !isTeacher);
+    // Students can see the feedback checklist now
+    document.getElementById('feedbackSection').classList.remove('hidden');
+    document.getElementById('saveFeedbackBtn').classList.toggle('hidden', !isTeacher);
+    document.getElementById('studentSelector').classList.toggle('hidden', !isTeacher);
+    
     document.getElementById('commentsSection').classList.remove('hidden'); // Everyone can see comments section now
     document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
 
     if (isTeacher) {
       await populateStudentSelector(taskId);
+      loadChecklistItems([]); // Clear checklist until student is selected
+    } else {
+      await loadStudentChecklist(user.id, user.name);
     }
 
     // Auto-enable editing for everyone
@@ -508,26 +526,34 @@
     const selector = document.getElementById('studentSelector');
     selector.innerHTML = '<option value="">Select Student...</option>';
     
-    // Find all unique students who have contributed revisions
-    const revisions = await db.getTaskRevisions(taskId);
-    const students = new Map(); // Use Map to keep unique student names/IDs (simulated by author name here for simplicity)
+    // Show all enrolled students
+    const students = await db.getProfiles();
     
-    // In a real app with proper IDs, we'd use session.user.id. 
-    // Here we'll group by revision author names to identify students.
-    revisions.forEach(rev => {
-       if (rev.author) students.set(rev.author, rev.author); 
-    });
-
-    students.forEach((name, id) => {
+    students.forEach(student => {
       const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = name;
+      opt.value = student.id;
+      opt.textContent = student.name;
       selector.appendChild(opt);
     });
+
+    // Fallback: If no students in profiles, check revisions for people who contributed
+    if (students.length === 0) {
+        const revisions = await db.getTaskRevisions(taskId);
+        const authors = new Set();
+        revisions.forEach(rev => { if (rev.author) authors.add(rev.author); });
+        authors.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            selector.appendChild(opt);
+        });
+    }
   }
 
-  async function loadStudentChecklist() {
-    const studentId = document.getElementById('studentSelector').value;
+  async function loadStudentChecklist(studentIdOverride, studentNameOverride) {
+    const selector = document.getElementById('studentSelector');
+    const studentId = studentIdOverride || selector.value;
+    
     if (!studentId) {
       loadChecklistItems([]);
       return;
@@ -552,52 +578,67 @@
     const listBody = document.getElementById('studentProgressBody');
     listBody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:40px;">Deep-scanning database for any activity...</td></tr>';
     
-    // Direct, independent fetches - even if tasks are empty, these will find people in the logs
+    // Direct, independent fetches
     const [profiles, allProgress, allRevisions] = await Promise.all([
         db.getProfiles(),
         db.getAllStudentChecklists(),
         db.getAllRevisions()
     ]);
     
-    // Unified Student Map
-    const studentMap = new Map();
+    const studentMap = new Map(); // Keyed by ID (UUID or Name fallback)
+    const nameMap = new Map();    // Keyed by Name (for cross-referencing)
 
-    // 1. Add people found in checklists (These have priority names set by teacher)
-    allProgress.forEach(entry => {
-        studentMap.set(entry.student_id, { 
-            id: entry.student_id, 
-            name: entry.student_name, // This is the 'Renamed' name
-            email: 'Legacy Account', 
-            lastActive: entry.updated_at,
-            completed: 0,
-            total: 0
-        });
-        const stats = studentMap.get(entry.student_id);
-        const taskItems = entry.items || [];
-        stats.completed = taskItems.filter(i => i.checked).length;
-        stats.total = taskItems.length;
-    });
-
-    // 2. Add people from profiles (Real accounts) - Overwrites legacy if ID matches
+    // 1. Initialize with real Profiles (These are our primary identities)
     profiles.forEach(p => {
-        const stats = studentMap.get(p.id) || { completed: 0, total: 0 };
-        studentMap.set(p.id, { 
+        const student = { 
             id: p.id, 
             name: p.name, 
             email: p.email, 
             lastActive: p.created_at,
-            completed: stats.completed,
-            total: stats.total
-        });
+            completed: 0,
+            total: 0,
+            isProfile: true
+        };
+        studentMap.set(p.id, student);
+        nameMap.set(p.name, student);
     });
 
-    // 3. Add remains from revisions (Final fallback)
-    allRevisions.forEach(rev => {
-        if (!studentMap.has(rev.author)) {
-             studentMap.set(rev.author, { id: rev.author, name: rev.author, email: 'Active Writer', lastActive: rev.timestamp, completed: 0, total: 0 });
+    // Helper to find or create student record consistently
+    const getStudent = (id, name, fallbackEmail, allowCreate = true) => {
+        if (studentMap.has(id)) return studentMap.get(id);
+        if (nameMap.has(name)) return nameMap.get(name);
+        if (nameMap.has(id)) return nameMap.get(id); 
+
+        if (!allowCreate) return null;
+
+        const newStudent = { id, name, email: fallbackEmail, lastActive: new Date(0).toISOString(), completed: 0, total: 0 };
+        studentMap.set(id, newStudent);
+        nameMap.set(name, newStudent);
+        return newStudent;
+    };
+
+    // 2. Merge Checklist Progress (Aggregates across all tasks)
+    allProgress.forEach(entry => {
+        const student = getStudent(entry.student_id, entry.student_name, 'Legacy Account');
+        const taskItems = entry.items || [];
+        student.completed += taskItems.filter(i => i.checked).length;
+        student.total += taskItems.length;
+        
+        if (new Date(entry.updated_at) > new Date(student.lastActive)) {
+            student.lastActive = entry.updated_at;
         }
-        const stats = studentMap.get(rev.author);
-        if (new Date(rev.timestamp) > new Date(stats.lastActive)) stats.lastActive = rev.timestamp;
+    });
+
+    // 3. Merge Revision activity
+    const currentUser = db.getCurrentUser();
+    allRevisions.forEach(rev => {
+        // Exclude teacher and only match existing registered students
+        if (currentUser && currentUser.role === 'teacher' && rev.author === currentUser.name) return;
+
+        const student = getStudent(rev.author, rev.author, null, false);
+        if (student && new Date(rev.timestamp) > new Date(student.lastActive)) {
+            student.lastActive = rev.timestamp;
+        }
     });
 
     listBody.innerHTML = '';
@@ -616,15 +657,15 @@
         
         const row = `
             <tr>
-              <td data-label="Student">
+              <td>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <div style="font-weight:600;">${student.name}</div>
                     <button class="btn-icon" style="padding:2px; font-size:10px;" onclick="promptRenameStudent('${student.id}', '${student.name}')" title="Rename Student">✏️</button>
                 </div>
                 <div style="font-size:11px; color:#999;">${student.email || 'System Account'}</div>
               </td>
-              <td data-label="Last Active" style="color:#666;">${new Date(student.lastActive).toLocaleDateString()}</td>
-              <td data-label="Checklist Progress">
+              <td style="color:#666;">${new Date(student.lastActive).toLocaleDateString()}</td>
+              <td>
                 <div style="display:flex; align-items:center; gap:12px;">
                   <div class="progress-bar-bg">
                     <div class="progress-bar-fill" style="width: ${percent}%"></div>
@@ -633,7 +674,7 @@
                 </div>
                 <div style="font-size:10px; color:#999; margin-top:4px;">${total > 0 ? `${completed} of ${total} total items` : 'No feedback given yet'}</div>
               </td>
-              <td data-label="Status"><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
+              <td><span class="badge ${total > 0 ? 'teacher' : 'student'}" style="font-size:10px;">${status}</span></td>
             </tr>
         `;
         listBody.innerHTML += row;
@@ -858,6 +899,32 @@
     await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
   }
 
+  async function saveCurrentChecklist() {
+    const studentId = document.getElementById('studentSelector').value;
+    const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
+    
+    if (!studentId) {
+      alert('Please select a student first');
+      return;
+    }
+
+    const items = [];
+    document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
+        items.push({
+            text: cb.nextElementSibling.textContent,
+            checked: cb.checked
+        });
+    });
+
+    try {
+      await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
+      alert('✅ Feedback checklist saved and submitted successfully!');
+    } catch (err) {
+      console.error(err);
+      alert('❌ Failed to save checklist. Please try again.');
+    }
+  }
+
   async function loadComments(taskId) {
     const commentsList = document.getElementById('commentsList');
     const taskComments = await db.getTaskComments(taskId);
@@ -965,8 +1032,33 @@
     const newName = prompt('Enter new display name for student:', currentName);
     if (newName && newName.trim() && newName !== currentName) {
         await db.renameProfile(studentId, newName.trim());
-        await loadStudentsView(); // Refresh the list
+        if (currentTaskId) {
+            await populateStudentSelector(currentTaskId);
+            document.getElementById('studentSelector').value = studentId;
+        }
+        await loadStudentsView(); // Refresh the list if visible
     }
+  }
+
+  async function promptRenameSelf() {
+    const user = db.getCurrentUser();
+    const newName = prompt('Enter your new display name:', user.name);
+    if (newName && newName.trim() && newName !== user.name) {
+        await db.renameProfile(user.id, newName.trim());
+        alert('Name updated! Page will reload to apply changes.');
+        location.reload(); 
+    }
+  }
+
+  async function renameSelectedStudent() {
+     const selector = document.getElementById('studentSelector');
+     const studentId = selector.value;
+     if (!studentId) {
+         alert('Please select a student from the list first');
+         return;
+     }
+     const currentName = selector.options[selector.selectedIndex].text;
+     await promptRenameStudent(studentId, currentName);
   }
 
   async function promptRename() {

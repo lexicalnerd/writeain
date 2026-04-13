@@ -504,133 +504,6 @@
       gap: 28px;
     }
 
-    /* ==========================================================================
-       MOBILE OVERHAUL (Native App Experience)
-       ========================================================================== */
-    @media (max-width: 992px) {
-      .container {
-        display: block;
-        padding: 0;
-        margin: 0;
-      }
-
-      /* Transform Sidebar into Top Bar & Bottom Nav */
-      .sidebar {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        width: 100%;
-        height: 70px;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        display: flex;
-        flex-direction: row;
-        justify-content: space-around;
-        align-items: center;
-        padding: 0 10px;
-        border-right: none;
-        border-top: 1px solid #eee;
-        z-index: 1000;
-        box-shadow: 0 -4px 20px rgba(0,0,0,0.05);
-      }
-
-      .sidebar .logo { display: none; }
-      .sidebar-divider { display: none; }
-      .sidebar-item {
-        margin: 0;
-        padding: 10px;
-        flex: 1;
-        text-align: center;
-        font-size: 10px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-      }
-      .sidebar-item:hover { transform: none; }
-
-      /* Content Area Adjustments */
-      .content {
-        margin-bottom: 80px; /* Space for bottom nav */
-        border-radius: 0;
-        padding: 20px 15px;
-        box-shadow: none;
-      }
-
-      .editor-container {
-        display: block;
-      }
-
-      /* Dashboard Grid */
-      .task-grid {
-        grid-template-columns: 1fr;
-      }
-
-      /* Editor Specifics */
-      .editor-header {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .toolbar {
-        width: 100%;
-        overflow-x: auto;
-        white-space: nowrap;
-        padding-bottom: 10px;
-        margin-top: 15px;
-        gap: 8px;
-        display: flex;
-        -webkit-overflow-scrolling: touch;
-      }
-      .toolbar::-webkit-scrollbar { display: none; }
-
-      .draft-text {
-        padding: 20px;
-        font-size: 15px;
-        min-height: 350px;
-        border-radius: 12px;
-      }
-
-      /* Stacked Sidebar Sections with better spacing */
-      .sidebar-section {
-        margin-top: 40px;
-        background: #f8f9fa;
-        padding: 20px;
-        border-radius: 16px;
-      }
-
-      /* Progress Table -> Card View fallback */
-      .progress-table thead { display: none; }
-      .progress-table, .progress-table tbody, .progress-table tr, .progress-table td {
-        display: block;
-        width: 100%;
-      }
-      .progress-table tr {
-        background: white;
-        margin-bottom: 15px;
-        border-radius: 12px;
-        padding: 15px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        border: 1px solid #eee;
-      }
-      .progress-table td {
-        border: none;
-        padding: 8px 0;
-      }
-      .progress-table td::before {
-        content: attr(data-label);
-        font-weight: 700;
-        font-size: 11px;
-        color: #999;
-        display: block;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-      }
-      
-      .progress-bar-bg { width: 100%; }
-    }
-
     .editor-container.focused-mode {
       grid-template-columns: 1fr;
       max-width: 900px;
@@ -1091,7 +964,10 @@
           <div class="user-profile">
             <div class="user-avatar" id="userAvatarIcon"></div>
             <div class="user-info">
-              <h4 id="userNameDisplay"></h4>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <h4 id="userNameDisplay"></h4>
+                <button class="btn-icon" style="padding: 2px; font-size: 10px; border: none; background: transparent;" onclick="promptRenameSelf()" title="Change My Name">✏️</button>
+              </div>
               <p id="userRoleDisplay"></p>
             </div>
           </div>
@@ -1177,13 +1053,17 @@
 
               <div>
                 <div class="sidebar-section" id="feedbackSection">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 style="margin: 0;">Feedback Checklist</h3>
-                    <select id="studentSelector" onchange="loadStudentChecklist()" style="font-size: 12px; padding: 4px; border-radius: 4px; border: 1px solid #ddd;">
-                      <option value="">Select Student...</option>
-                    </select>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px;">
+                    <h3 style="margin: 0; font-size: 13px;">Feedback For</h3>
+                    <div style="display: flex; gap: 4px; align-items: center; flex: 1;">
+                      <select id="studentSelector" onchange="loadStudentChecklist()" style="flex: 1; font-size: 12px; padding: 4px; border-radius: 4px; border: 1px solid #ddd;">
+                        <option value="">Select Student...</option>
+                      </select>
+                      <button class="btn-icon" onclick="renameSelectedStudent()" title="Rename selected student" style="padding: 4px;">✏️</button>
+                    </div>
                   </div>
                   <ul class="checklist" id="checklistItems"></ul>
+                  <button id="saveFeedbackBtn" class="btn btn-primary btn-sm hidden" onclick="saveCurrentChecklist()" style="margin-top: 16px; font-size: 13px; background: #667eea; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer;">💾 Save & Submit Feedback</button>
                 </div>
 
                 <div class="sidebar-section" id="commentsSection">
