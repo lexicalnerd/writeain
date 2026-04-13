@@ -504,6 +504,48 @@
       gap: 28px;
     }
 
+    @media (max-width: 1024px) {
+      .editor-container {
+        grid-template-columns: 1fr;
+      }
+      .container {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: static;
+        width: 100%;
+        height: auto;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+      .content {
+        padding: 20px;
+      }
+      .editor-header {
+        flex-direction: column;
+        gap: 16px;
+      }
+      .toolbar {
+        justify-content: center;
+      }
+      .draft-text {
+        padding: 20px;
+        min-height: 300px;
+      }
+      .progress-container {
+        overflow-x: auto;
+      }
+      .progress-table {
+        min-width: 600px;
+      }
+    }
+
     .editor-container.focused-mode {
       grid-template-columns: 1fr;
       max-width: 900px;
