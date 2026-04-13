@@ -161,6 +161,29 @@
             return data;
         }
 
+        async getStudentChecklist(taskId, studentId) {
+            const { data, error } = await _supabase
+                .from('student_checklists')
+                .select('*')
+                .eq('task_id', taskId)
+                .eq('student_id', studentId)
+                .single();
+            return data;
+        }
+
+        async updateStudentChecklist(taskId, studentId, studentName, items) {
+            const { data, error } = await _supabase
+                .from('student_checklists')
+                .upsert({ 
+                    task_id: taskId, 
+                    student_id: studentId, 
+                    student_name: studentName,
+                    items: items,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'task_id,student_id' });
+            return data;
+        }
+
         async getTaskComments(taskId) {
             const { data, error } = await _supabase
                 .from('comments')
@@ -343,9 +366,57 @@
     document.getElementById('commentsSection').classList.toggle('hidden', !isTeacher);
     document.getElementById('revisionsSection').classList.toggle('hidden', !isTeacher);
 
-    loadChecklistItems(task.checklist);
+    if (isTeacher) {
+      await populateStudentSelector(taskId);
+    }
+
+    loadChecklistItems([]); // Clear checklist until student is selected
     await loadComments(taskId);
     await loadRevisions(taskId);
+  }
+
+  async function populateStudentSelector(taskId) {
+    const selector = document.getElementById('studentSelector');
+    selector.innerHTML = '<option value="">Select Student...</option>';
+    
+    // Find all unique students who have contributed revisions
+    const revisions = await db.getTaskRevisions(taskId);
+    const students = new Map(); // Use Map to keep unique student names/IDs (simulated by author name here for simplicity)
+    
+    // In a real app with proper IDs, we'd use session.user.id. 
+    // Here we'll group by revision author names to identify students.
+    revisions.forEach(rev => {
+       if (rev.author) students.set(rev.author, rev.author); 
+    });
+
+    students.forEach((name, id) => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = name;
+      selector.appendChild(opt);
+    });
+  }
+
+  async function loadStudentChecklist() {
+    const studentId = document.getElementById('studentSelector').value;
+    if (!studentId) {
+      loadChecklistItems([]);
+      return;
+    }
+
+    const task = await db.getTask(currentTaskId);
+    const savedProgress = await db.getStudentChecklist(currentTaskId, studentId);
+    
+    // Merge master checklist template with student's saved progress
+    const items = task.checklist.map((templateItem, idx) => {
+      const savedItem = savedProgress?.items?.[idx];
+      return {
+        text: typeof templateItem === 'object' ? templateItem.text : templateItem,
+        checked: savedItem ? savedItem.checked : false
+      };
+    });
+
+    loadChecklistItems(items);
   }
 
   let highlightsEnabled = false;
@@ -549,11 +620,21 @@
   }
 
   async function toggleChecklistItem(idx, checked) {
-    const task = await db.getTask(currentTaskId);
-    if (task && task.checklist[idx]) {
-      task.checklist[idx].checked = checked;
-      await db.updateChecklist(currentTaskId, task.checklist);
-    }
+    const studentId = document.getElementById('studentSelector').value;
+    const studentName = document.getElementById('studentSelector').options[document.getElementById('studentSelector').selectedIndex].text;
+    
+    if (!studentId) return;
+
+    // Get current checklist UI state
+    const items = [];
+    document.querySelectorAll('#checklistItems input').forEach((cb, i) => {
+        items.push({
+            text: cb.nextElementSibling.textContent,
+            checked: i === idx ? checked : cb.checked
+        });
+    });
+
+    await db.updateStudentChecklist(currentTaskId, studentId, studentName, items);
   }
 
   async function loadComments(taskId) {
