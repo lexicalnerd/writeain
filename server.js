@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -14,6 +15,18 @@ if (fs.existsSync(envPath)) {
             process.env[key.trim()] = valueParts.join('=').trim().replace(/(^['"]|['"]$)/g, '');
         }
     });
+}
+
+function getLocalIp() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '0.0.0.0';
 }
 
 // Serve static files from the 'public' directory
@@ -32,9 +45,12 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+const LAN_IP = getLocalIp();
+
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`
 🚀 WriteRain Server is Live!
-🌍 http://localhost:${PORT}
+🏠 Local:  http://localhost:${PORT}
+🌐 Network: http://${LAN_IP}:${PORT}
     `);
 });

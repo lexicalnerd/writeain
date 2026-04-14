@@ -3,7 +3,8 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#667eea">
   <title>WriteRain - Collaborative Writing</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&family=Fredoka:wght@300;400;500;600;700&display=swap"
@@ -15,6 +16,7 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
     }
 
     body {
@@ -22,6 +24,7 @@
       background: linear-gradient(135deg, #f0f8ff 0%, #fff0f5 100%);
       color: #2c3e50;
       min-height: 100vh;
+      line-height: 1.5;
     }
 
     h1,
@@ -897,6 +900,184 @@
       height: 100%;
       background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
       transition: width 0.5s ease;
+    }
+
+    /* Mobile Responsive Optimizations */
+    @media (max-width: 1024px) {
+      .editor-container {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+      
+      .editor-container.focused-mode {
+        max-width: 100%;
+      }
+
+      .sidebar-section {
+        margin-bottom: 20px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .auth-screen {
+        padding: 40px 20px;
+        align-items: flex-start;
+        overflow-y: auto;
+      }
+
+      .container {
+        padding: 12px;
+      }
+
+      .auth-container {
+        grid-template-columns: 1fr;
+        gap: 32px;
+        width: 100%;
+        max-width: 450px;
+        margin: 0 auto;
+      }
+      
+      .auth-welcome {
+        text-align: center;
+        padding: 40px 20px 0;
+      }
+
+      .auth-welcome h1 {
+        font-size: 42px;
+        margin-bottom: 12px;
+      }
+
+      .auth-welcome p {
+        font-size: 15px;
+        max-width: 320px;
+        margin: 0 auto;
+      }
+
+      .dashboard {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+
+      .sidebar {
+        width: 100%;
+        padding: 20px;
+      }
+
+      .content {
+        padding: 24px 20px;
+      }
+
+      .editor-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 16px;
+      }
+
+      .toolbar {
+        margin: 0;
+        padding-bottom: 12px;
+        gap: 8px;
+        justify-content: flex-start;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+
+      .toolbar::-webkit-scrollbar {
+        display: none;
+      }
+
+      .toolbar-btn {
+        flex: 0 0 auto;
+        padding: 8px 14px;
+        font-size: 12px;
+      }
+
+      .draft-text {
+        padding: 24px 20px;
+        min-height: 350px;
+        font-size: 15px;
+        line-height: 1.8;
+      }
+
+      .progress-container {
+        overflow-x: auto;
+        margin: 0 -20px;
+        padding: 0 20px;
+      }
+
+      .progress-table {
+        min-width: 500px;
+      }
+
+      .modal-content {
+        padding: 30px 20px;
+        width: 92%;
+        border-radius: 20px;
+      }
+
+      .auth-box {
+        padding: 32px 24px;
+        border-radius: 24px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .auth-welcome h1 {
+        font-size: 36px;
+      }
+
+      .auth-tabs {
+        margin-bottom: 24px;
+        gap: 8px;
+      }
+
+      .auth-tab {
+        padding: 10px 14px;
+        font-size: 14px;
+        flex: 1;
+        text-align: center;
+      }
+
+      .btn {
+        padding: 12px 20px;
+        font-size: 14px;
+      }
+
+      .editor-header h2 {
+        font-size: 20px;
+      }
+
+      .user-profile {
+        padding: 12px;
+        margin-bottom: 16px;
+      }
+
+      .user-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+      }
+      
+      .task-card {
+        padding: 16px;
+        border-radius: 14px;
+      }
+
+      .task-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .helper-text {
+        font-size: 12px;
+        padding: 10px;
+      }
+
+      .sidebar-item {
+        padding: 10px 14px;
+        font-size: 13px;
+      }
     }
   </style>
 </head>
